@@ -1,0 +1,39 @@
+body {
+    margin: 0;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    background-color: #0b0f19;
+    font-family: system-ui, -apple-system, sans-serif;
+    touch-action: none;
+    /* Impede gestos padrão de arrastar a página no iOS/Safari */
+}
+
+/* Garante posicionamento absoluto do canvas de renderização */
+canvas {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: 0;
+    display: block;
+}
+
+/* Scrollbars elegantes para o painel de controlo */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.6);
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(245, 158, 11, 0.4);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(245, 158, 11, 0.6);
+}

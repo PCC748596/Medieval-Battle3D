@@ -1,0 +1,1514 @@
+// --- CLASSE DO GUERREIRO MULTI-FUNÇÕES ---
+let warriorUidCounter = 0;
+class Warrior {
+    clone() { return {x:this.x, y:this.y, z:this.z}; }
+    set(x,y,z) { this.x=x; this.y=y; this.z=z; }
+    constructor(faction, role, x, z, isPusher = false, catapult = null) {
+        this.uid = warriorUidCounter++;
+        this.faction = faction;
+        this.role = role;
+        this.isPusher = isPusher;
+        this.isFlanker = (role === 'melee' && !isPusher && Math.random() < flankRatio);
+        this.catapult = catapult;
+        this.id = faction + "_" + role + "_" + Math.floor(Math.random() * 100000);
+
+        this.isDaggerArcher = (role === 'archer' && Math.random() < 0.20);
+
+        this.hp = (role === 'melee') ? 220 : 100;
+        this.maxHp = this.hp;
+
+        const army = armies[faction];
+        const baseSpeed = (role === 'melee') ? army.baseSpeedMelee : army.baseSpeedArcher;
+        this.speed = (baseSpeed + Math.random() * 0.02) * 60;
+
+        this.attackRange = isNapoleonicTheme() ? 100.0 : (((role === 'melee' || this.isDaggerArcher)) ? 2.8 : 100.0);
+        this.keepDistanceRange = ((role === 'melee' || this.isDaggerArcher)) ? 0 : 50.0;
+        this.attackCooldown = 0;
+        this.isDead = false;
+        this.target = null;
+
+        this.animTime = Math.random() * 100;
+        this.isAttacking = false;
+        this.attackAnimProgress = 0;
+        this.radius = 1.1;
+        this.flashTimer = 0;
+
+        this.knockback = new THREE.Vector3();
+        this.knockbackTimer = 0;
+        this.launchVY = 0;
+        this.launchKills = false;
+        this.tumbleX = 0;
+        this.tumbleY = 0;
+        this.tumbleZ = 0;
+
+        this.lastVelocity = new THREE.Vector3();
+        this.lastTargetAngle = 0;
+        this.isKiting = false;
+
+        this.morale = 6 + Math.floor(Math.random() * 5); // 6 to 10
+        this.isFleeing = false;
+        this.fleeStartX = 0;
+        this.fleeStartZ = 0;
+        this.fleeTimer = 0;
+        this.hasRetreated50m = false;
+
+        this.aiTick = Math.floor(Math.random() * 24);
+
+        this.stuckTimer = 0;
+        this.stuckDuration = 0;
+        this.stuckAngleOffset = 0;
+        this.isTryingToMove = false;
+        this.attackerCount = 0;
+        this.lodLevel = 0;
+
+        this.assembleBody();
+
+        const terrainY = getTerrainHeight(x, z);
+        this.terrainY = terrainY;
+        this.set(x, terrainY + 1.5, z);
+        this.rotY = armies[faction].rotationY;
+        this.lastTargetAngle = this.rotY;
+    }
+
+    assembleBody() {
+        if (!templateMeshes[this.faction][this.role]) {
+            const template = new THREE.Group();
+
+            const lodMat = armies[this.faction].lodMat();
+            const lodGeo = (this.role === 'melee') ? lodGeoCube : lodGeoCircle;
+            const lodPrimitive = new THREE.Mesh(lodGeo, lodMat);
+            lodPrimitive.name = 'lodPrimitive';
+            lodPrimitive.position.y = 1.5;
+            lodPrimitive.visible = false;
+            template.add(lodPrimitive);
+
+            if (currentTheme === 'napoleonic_3d') {
+                // --- TEMA NAPOLEÓNICO 3D (Substituído pelo modelo Low-Poly ultra leve pedido ~84 Tris) ---
+                const isFrench = armies[this.faction].isFrench;
+                const coatMat = new THREE.MeshLambertMaterial({ color: isFrench ? 0x1f3c73 : 0xb32424 });
+                const skinMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+                const pantsMat = new THREE.MeshLambertMaterial({ color: 0x5c4033 });
+                const gunMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+
+                const torso = new THREE.Group(); torso.name = "torso"; torso.position.y = 0.525; template.add(torso);
+                const chest = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.1, 0.45), coatMat);
+                chest.position.y = 0.55;
+                torso.add(chest);
+
+                const head = new THREE.Group(); head.name = "head"; head.position.y = 1.15; torso.add(head);
+                const skull = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), skinMat);
+                skull.position.y = 0.225;
+                head.add(skull);
+
+                const armL = new THREE.Group(); armL.name = "armL"; armL.position.set(-0.55, 1.275, 0); template.add(armL);
+                const sleeveL = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.8, 0.25), coatMat);
+                sleeveL.position.y = -0.4;
+                armL.add(sleeveL);
+
+                const armR = new THREE.Group(); armR.name = "armR"; armR.position.set(0.55, 1.275, 0); template.add(armR);
+                const sleeveR = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.8, 0.25), coatMat);
+                sleeveR.position.y = -0.4;
+                armR.add(sleeveR);
+                
+                const bowGroup = new THREE.Group(); bowGroup.name = "bowGroup";
+                const gunMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 1.8), gunMat);
+                gunMesh.position.set(0, 0, 0.5);
+                bowGroup.add(gunMesh);
+                armR.add(bowGroup);
+
+                const legL = new THREE.Group(); legL.name = "legL"; legL.position.set(-0.25, 0.525, 0); template.add(legL);
+                const pantsL = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.7, 0.3), pantsMat);
+                pantsL.position.y = -0.35;
+                legL.add(pantsL);
+
+                const legR = new THREE.Group(); legR.name = "legR"; legR.position.set(0.25, 0.525, 0); template.add(legR);
+                const pantsR = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.7, 0.3), pantsMat);
+                pantsR.position.y = -0.35;
+                legR.add(pantsR);
+
+                templateMeshes[this.faction][this.role] = template;
+            } else if (currentTheme === 'napoleonic') {
+                const isFrench = armies[this.faction].isFrench;
+                const coatColor = isFrench ? 0x1f3c73 : 0xb32424;
+                const collarColor = isFrench ? 0xb32424 : 0x1f3c73;
+                const plumeColor = isFrench ? 0x2196F3 : 0xf44336;
+                const epauletteColor = isFrench ? 0xb32424 : 0xffffff;
+
+                const coatMat = new THREE.MeshLambertMaterial({ color: coatColor });
+                const collarMat = new THREE.MeshLambertMaterial({ color: collarColor });
+                const plumeMat = new THREE.MeshLambertMaterial({ color: plumeColor });
+                const epauletteMat = new THREE.MeshLambertMaterial({ color: epauletteColor });
+                const whiteMat = new THREE.MeshLambertMaterial({ color: 0xf5f5f5 });
+                const blackMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+                const goldMat = new THREE.MeshLambertMaterial({ color: 0xd4af37 });
+                const brownMat = new THREE.MeshLambertMaterial({ color: 0x5c4033 });
+                const skinMat = skinFleshMat;
+
+                const torso = new THREE.Mesh(geomBody, coatMat);
+                torso.name = "torso";
+                torso.position.y = 0.525;
+                template.add(torso);
+
+                const strap1 = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.9, 0.05), whiteMat);
+                strap1.position.set(0, 0, 0.41);
+                strap1.rotation.z = 0.4;
+                torso.add(strap1);
+
+                const strap2 = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.9, 0.05), whiteMat);
+                strap2.position.set(0, 0, 0.415);
+                strap2.rotation.z = -0.4;
+                torso.add(strap2);
+
+                const strap1Back = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.9, 0.05), whiteMat);
+                strap1Back.position.set(0, 0, -0.41);
+                strap1Back.rotation.z = -0.4;
+                torso.add(strap1Back);
+
+                const strap2Back = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.9, 0.05), whiteMat);
+                strap2Back.position.set(0, 0, -0.415);
+                strap2Back.rotation.z = 0.4;
+                torso.add(strap2Back);
+
+                const collar = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.6), collarMat);
+                collar.position.y = 0.95;
+                torso.add(collar);
+
+                const epauletteL = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.08, 0.45), epauletteMat);
+                epauletteL.position.set(-0.6, 0.9, 0);
+                torso.add(epauletteL);
+
+                const epauletteR = epauletteL.clone();
+                epauletteR.position.x = 0.6;
+                torso.add(epauletteR);
+
+                const backpack = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.1, 0.35), brownMat);
+                backpack.position.set(0, 0.1, 0.58);
+                torso.add(backpack);
+
+                const bedroll = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 1.0, 5), whiteMat);
+                bedroll.rotation.z = Math.PI / 2;
+                bedroll.position.set(0, 0.65, 0.58);
+                torso.add(bedroll);
+
+                const head = new THREE.Mesh(geomHead, skinMat);
+                head.name = "head";
+                head.position.y = 1.825;
+                template.add(head);
+
+                const eyeL = new THREE.Mesh(geomEye, eyeMat);
+                eyeL.name = "eyeL";
+                eyeL.position.set(-0.2, 0.15, -0.41);
+                head.add(eyeL);
+
+                const eyeR = new THREE.Mesh(geomEye, eyeMat);
+                eyeR.name = "eyeR";
+                eyeR.position.set(0.2, 0.15, -0.41);
+                head.add(eyeR);
+
+                if (!isFrench) {
+                    const shako = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.42, 0.75, 6), blackMat);
+                    shako.position.y = 0.65;
+                    shako.rotation.y = Math.PI / 6;
+                    head.add(shako);
+
+                    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.04, 0.28), blackMat);
+                    visor.position.set(0, 0.3, -0.42);
+                    visor.rotation.x = 0.15;
+                    head.add(visor);
+
+                    const shakoTrim = new THREE.Mesh(new THREE.CylinderGeometry(0.49, 0.43, 0.08, 6), goldMat);
+                    shakoTrim.position.y = 0.65 + 0.33;
+                    shakoTrim.rotation.y = Math.PI / 6;
+                    head.add(shakoTrim);
+
+                    const shakoTrimBottom = new THREE.Mesh(new THREE.CylinderGeometry(0.43, 0.425, 0.06, 6), goldMat);
+                    shakoTrimBottom.position.y = 0.65 - 0.33;
+                    shakoTrimBottom.rotation.y = Math.PI / 6;
+                    head.add(shakoTrimBottom);
+
+                    const plume = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.15, 0.5, 4), plumeMat);
+                    plume.position.set(0, 1.1, -0.2);
+                    plume.rotation.x = -0.1;
+                    head.add(plume);
+
+                    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.22, 0.02), goldMat);
+                    plate.position.set(0, 0.65, -0.42);
+                    head.add(plate);
+                }
+
+                const armL = new THREE.Mesh(geomArm, coatMat);
+                armL.name = "armL";
+                armL.position.set(-0.85, 1.275, 0);
+                template.add(armL);
+
+                const armR = new THREE.Mesh(geomArmStraight, coatMat);
+                armR.name = "armR";
+                armR.position.set(0.85, 1.275, 0);
+                armR.rotation.set(0.43, 0, -0.05);
+                template.add(armR);
+
+                const cuffL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.2, 0.24), collarMat);
+                cuffL.position.set(0, -0.65, -0.22);
+                armL.add(cuffL);
+
+                const cuffR = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.2, 0.24), collarMat);
+                cuffR.position.set(0, -1.2, 0);
+                armR.add(cuffR);
+
+                const bowGroup = new THREE.Group();
+                bowGroup.name = "bowGroup";
+
+                const stock = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 2.2), brownMat);
+                stock.position.set(0, 0, 0.1);
+                bowGroup.add(stock);
+
+                const butt = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.32, 0.6), brownMat);
+                butt.position.set(0, -0.12, -0.9);
+                bowGroup.add(butt);
+
+                const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 2.3, 4), steelMaterial);
+                barrel.rotation.x = Math.PI / 2;
+                barrel.position.set(0, 0.08, 0.35);
+                bowGroup.add(barrel);
+
+                const bayonet = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.08, 0.45), steelMaterial);
+                bayonet.position.set(0, 0.08, 1.55);
+                bowGroup.add(bayonet);
+
+                const stringPoints = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0)];
+                const stringGeo = new THREE.BufferGeometry().setFromPoints(stringPoints);
+                const stringMat = new THREE.LineBasicMaterial({ color: 0xffffff, visible: false });
+                const bowString = new THREE.Line(stringGeo, stringMat);
+                bowString.name = "bowString";
+                bowGroup.add(bowString);
+
+                bowGroup.position.set(0, -0.1, -0.3);
+                bowGroup.rotation.set(-1.55, 0, 0);
+                armR.add(bowGroup);
+
+                const legL = new THREE.Group();
+                legL.name = "legL";
+                legL.position.set(-0.32, -0.375, 0);
+                const pantsL = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.75, 0.45), whiteMat);
+                pantsL.position.y = -0.375;
+                legL.add(pantsL);
+                const bootL = new THREE.Mesh(new THREE.BoxGeometry(0.47, 0.55, 0.47), blackMat);
+                bootL.position.y = -0.85;
+                legL.add(bootL);
+                template.add(legL);
+
+                const legR = new THREE.Group();
+                legR.name = "legR";
+                legR.position.set(0.32, -0.375, 0);
+                const pantsR = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.75, 0.45), whiteMat);
+                pantsR.position.y = -0.375;
+                legR.add(pantsR);
+                const bootR = new THREE.Mesh(new THREE.BoxGeometry(0.47, 0.55, 0.47), blackMat);
+                bootR.position.y = -0.85;
+                legR.add(bootR);
+                template.add(legR);
+
+                template.traverse(child => {
+                    if (child.isMesh) {
+                        child.frustumCulled = false;
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+
+                templateMeshes[this.faction][this.role] = template;
+            } else {
+                const bodyMat = sharedBodyMaterials[this.faction][this.role];
+
+                const torso = new THREE.Mesh(geomBody, bodyMat);
+                torso.name = "torso";
+                template.add(torso);
+
+                if (this.role === 'archer') {
+                    const quiverGroup = new THREE.Group();
+                    quiverGroup.name = "quiverGroup";
+                    const quiver = new THREE.Mesh(geomQuiver, quiverMaterial);
+                    quiverGroup.add(quiver);
+
+                    for (let i = 0; i < 2; i++) {
+                        const shaft = new THREE.Mesh(geomQuiverArrowShaft, woodMaterial);
+                        shaft.position.set((Math.random() - 0.5) * 0.1, 0.5, (Math.random() - 0.5) * 0.1);
+                        quiverGroup.add(shaft);
+                    }
+                    quiverGroup.position.set(0.3, 0.2, 0.52);
+                    quiverGroup.rotation.z = -Math.PI / 6;
+                    torso.add(quiverGroup);
+                }
+
+                const headMat = armies[this.faction].headMat();
+                const head = new THREE.Mesh(geomHead, headMat);
+                head.name = "head";
+                head.position.y = 1.3;
+                template.add(head);
+
+                const eyeL = new THREE.Mesh(geomEye, eyeMat);
+                eyeL.name = "eyeL";
+                eyeL.position.set(-0.2, 0.15, -0.41);
+                head.add(eyeL);
+
+                const eyeR = new THREE.Mesh(geomEye, eyeMat);
+                eyeR.name = "eyeR";
+                eyeR.position.set(0.2, 0.15, -0.41);
+                head.add(eyeR);
+
+                if (this.faction === 'knights') {
+                    // Retirado o capacete (chapeuzinho) do soldado do exército azul a pedido do usuário
+                } else {
+                    const earL = new THREE.Mesh(geomEar, skinGreenMat);
+                    earL.name = "earL";
+                    earL.rotation.z = Math.PI / 3;
+                    earL.position.set(-0.45, 0, 0);
+                    head.add(earL);
+
+                    const earR = earL.clone();
+                    earR.name = "earR";
+                    earR.rotation.z = -Math.PI / 2.5;
+                    earR.position.set(0.45, 0, 0);
+                    head.add(earR);
+                }
+
+                const armL = new THREE.Mesh((this.role === 'melee') ? geomArmL : geomArm, bodyMat);
+                armL.name = "armL";
+                armL.position.set(-0.85, 0.75, 0);
+                template.add(armL);
+
+                const armR = new THREE.Mesh(geomArm, bodyMat);
+                armR.name = "armR";
+                armR.position.set(0.85, 0.75, 0);
+                template.add(armR);
+
+                if (this.role === 'melee') {
+                    const shieldMat = shieldMaterials[this.faction];
+                    const shield = new THREE.Mesh(geomShield, shieldMat);
+                    shield.name = "shield";
+                    shield.position.set(0.38, -0.1, -0.73);
+                    shield.rotation.y = 0.2;
+                    armL.add(shield);
+
+                    const swordGroup = new THREE.Group();
+                    swordGroup.name = "swordGroup";
+                    const blade = new THREE.Mesh(geomSwordBlade, armies[this.faction].bladeMat());
+                    blade.position.y = 0.75;
+                    swordGroup.add(blade);
+
+                    const guard = new THREE.Mesh(geomSwordHilt, steelMaterial);
+                    guard.rotation.z = Math.PI / 2;
+                    swordGroup.add(guard);
+
+                    swordGroup.position.set(0, -0.55, -0.45);
+                    swordGroup.rotation.x = -50 * Math.PI / 180;
+                    armR.add(swordGroup);
+                } else {
+                    const bowGroup = new THREE.Group();
+                    bowGroup.name = "bowGroup";
+
+                    const limbTop = new THREE.Mesh(geomBowLimb, woodMaterial);
+                    limbTop.position.set(0, 0.4, 0.13);
+                    limbTop.rotation.x = 0.3;
+                    bowGroup.add(limbTop);
+
+                    const limbBottom = new THREE.Mesh(geomBowLimb, woodMaterial);
+                    limbBottom.position.set(0, -0.4, 0.13);
+                    limbBottom.rotation.x = -0.3;
+                    bowGroup.add(limbBottom);
+
+                    const grip = new THREE.Mesh(geomBowGrip, woodMaterial);
+                    bowGroup.add(grip);
+
+                    const stringPoints = [
+                        new THREE.Vector3(0, 0.72, 0.2),
+                        new THREE.Vector3(0, 0, 0.16),
+                        new THREE.Vector3(0, -0.72, 0.2)
+                    ];
+
+                    const stringGeo = new THREE.BufferGeometry().setFromPoints(stringPoints);
+                    const stringMat = new THREE.LineBasicMaterial({ color: 0xffffff });
+                    const bowString = new THREE.Line(stringGeo, stringMat);
+                    bowString.name = "bowString";
+                    bowGroup.add(bowString);
+
+                    bowGroup.position.set(0, -0.55, -0.45);
+                    bowGroup.rotation.set(0, 0, 0);
+                    armL.add(bowGroup);
+                }
+
+                const legL = new THREE.Mesh(geomLeg, bodyMat);
+                legL.name = "legL";
+                legL.position.set(-0.32, -0.9, 0);
+                template.add(legL);
+
+                const legR = new THREE.Mesh(geomLeg, bodyMat);
+                legR.name = "legR";
+                legR.position.set(0.32, -0.9, 0);
+                template.add(legR);
+
+                template.traverse(child => {
+                    if (child.isMesh) {
+                        child.frustumCulled = false;
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+
+                templateMeshes[this.faction][this.role] = template;
+            }
+        }
+
+        this.baseColor = new THREE.Color(0xffffff);
+        if (this.isPusher) {
+            const colorHex = armies[this.faction].colorHex;
+            this.baseColor.setHex(colorHex);
+            this.scale = 1.15;
+        } else {
+            this.scale = 1.0;
+        }
+        this.visible = true;
+    }
+    getAvoidanceDir(dir) {
+        if (this.lodLevel >= 2) return dir; // Skip avoidance entirely for very far units!
+        if (this.stuckDuration > 0) {
+            return _tmpVec3C.copy(dir).applyAxisAngle(_axisY, this.stuckAngleOffset);
+        }
+
+        const px = this.x;
+        const pz = this.z;
+
+        let repelX = 0;
+        let repelZ = 0;
+
+        // 1. Desvio de Árvores em Pé - Otimizado com spatial grid
+        if (window._treeGrid) {
+            const halfX = 500 + 50;
+            const halfZ = 500 + 50;
+            const wCol = Math.max(0, Math.min(window._treeGridCols - 1, Math.floor((px + halfX) / window._treeGridSize)));
+            const wRow = Math.max(0, Math.min(window._treeGridRows - 1, Math.floor((pz + halfZ) / window._treeGridSize)));
+            const avoidanceRadius = 3.2;
+            const avoidanceRadiusSq = avoidanceRadius * avoidanceRadius;
+            
+            for (let cOff = -1; cOff <= 1; cOff++) {
+                for (let rOff = -1; rOff <= 1; rOff++) {
+                    const c = wCol + cOff;
+                    const r = wRow + rOff;
+                    if (c < 0 || c >= window._treeGridCols || r < 0 || r >= window._treeGridRows) continue;
+                    
+                    const cell = window._treeGrid[c + r * window._treeGridCols];
+                    for (let i = 0; i < cell.length; i++) {
+                        const tree = cell[i];
+                        const dx = px - tree.x;
+                        const dz = pz - tree.z;
+                        const distSq = dx * dx + dz * dz;
+                        
+                        if (distSq < avoidanceRadiusSq) {
+                            const dist = Math.sqrt(distSq) || 0.001;
+                            const force = ((avoidanceRadius - dist) / avoidanceRadius) * 2.0;
+                            repelX += (dx / dist) * force;
+                            repelZ += (dz / dist) * force;
+                        }
+                    }
+                }
+            }
+        } else {
+            // Fallback se o grid não estiver pronto
+            for (let i = 0; i < treePositions.length; i++) {
+                const tree = treePositions[i];
+                const dx = px - tree.x;
+                const dz = pz - tree.z;
+                const distSq = dx * dx + dz * dz;
+                const avoidanceRadius = 3.2;
+                const avoidanceRadiusSq = avoidanceRadius * avoidanceRadius;
+
+                if (distSq < avoidanceRadiusSq) {
+                    const dist = Math.sqrt(distSq) || 0.001;
+                    const force = ((avoidanceRadius - dist) / avoidanceRadius) * 2.0;
+                    repelX += (dx / dist) * force;
+                    repelZ += (dz / dist) * force;
+                }
+            }
+        }
+
+        // 2. Desvio de Troncos Caídos
+        for (let i = 0; i < fallenLogs.length; i++) {
+            const log = fallenLogs[i];
+            const abx = log.bx - log.ax;
+            const abz = log.bz - log.az;
+            const apx = px - log.ax;
+            const apz = pz - log.az;
+            const ab2 = abx * abx + abz * abz;
+            if (ab2 === 0) continue;
+
+            const t = Math.max(0, Math.min(1, (apx * abx + apz * abz) / ab2));
+            const cx = log.ax + t * abx;
+            const cz = log.az + t * abz;
+            const dx = px - cx;
+            const dz = pz - cz;
+            const distSq = dx * dx + dz * dz;
+            const avoidanceRadius = log.radius + 2.5;
+            const avoidanceRadiusSq = avoidanceRadius * avoidanceRadius;
+
+            if (distSq < avoidanceRadiusSq) {
+                const dist = Math.sqrt(distSq) || 0.001;
+                const force = ((avoidanceRadius - dist) / avoidanceRadius) * 2.0;
+                repelX += (dx / dist) * force;
+                repelZ += (dz / dist) * force;
+            }
+        }
+
+        // 3. Desvio de Lagos
+        for (let i = 0; i < lakes.length; i++) {
+            const lake = lakes[i];
+            const dx = px - lake.x;
+            const dz = pz - lake.z;
+            const distSq = dx * dx + dz * dz;
+            const avoidanceRadius = lake.r + 2.0;
+            const avoidanceRadiusSq = avoidanceRadius * avoidanceRadius;
+
+            if (distSq < avoidanceRadiusSq) {
+                const dist = Math.sqrt(distSq) || 0.001;
+                const force = ((avoidanceRadius - dist) / avoidanceRadius) * 4.0;
+                repelX += (dx / dist) * force;
+                repelZ += (dz / dist) * force;
+            }
+        }
+
+        // 4. Desvio de Catapultas (não desvia se a catapulta for o alvo do guerreiro)
+        const catapults = battleManager.getCatapults();
+        for (let i = 0; i < catapults.length; i++) {
+            const cat = catapults[i];
+            if (cat.isDead) continue;
+            if (this.target === cat) continue;
+
+            const dx = px - cat.mesh.position.x;
+            const dz = pz - cat.mesh.position.z;
+            const distSq = dx * dx + dz * dz;
+            const avoidanceRadius = cat.radius + 2.5; // ~5.0m
+            const avoidanceRadiusSq = avoidanceRadius * avoidanceRadius;
+
+            if (distSq < avoidanceRadiusSq) {
+                const dist = Math.sqrt(distSq) || 0.001;
+                const force = ((avoidanceRadius - dist) / avoidanceRadius) * 2.5;
+                repelX += (dx / dist) * force;
+                repelZ += (dz / dist) * force;
+            }
+        }
+
+        // 5. Desvio de Aliados Engajados / Parados para evitar empurrões por trás e manter as fileiras organizadas
+        if (window.spatialGrid && window.GRID_COLS && window.GRID_CELL_SIZE) {
+            const gridCols = window.GRID_COLS;
+            const cellSize = window.GRID_CELL_SIZE;
+            const halfX = (typeof sizeX !== 'undefined' ? sizeX : 1000) / 2 + 10;
+            const halfZ = (typeof sizeZ !== 'undefined' ? sizeZ : 1000) / 2 + 10;
+            
+            const col = Math.max(0, Math.min(gridCols - 1, Math.floor((px + halfX) / cellSize)));
+            const row = Math.max(0, Math.min(window.GRID_ROWS - 1, Math.floor((pz + halfZ) / cellSize)));
+            
+            const avoidanceRadius = 3.5;
+            const avoidanceRadiusSq = avoidanceRadius * avoidanceRadius;
+            
+            for (let cOff = -1; cOff <= 1; cOff++) {
+                for (let rOff = -1; rOff <= 1; rOff++) {
+                    const c = col + cOff;
+                    const r = row + rOff;
+                    if (c < 0 || c >= gridCols || r < 0 || r >= window.GRID_ROWS) continue;
+                    
+                    const cell = window.spatialGrid[c + r * gridCols];
+                    if (!cell || cell.length === 0) continue;
+                    
+                    for (let i = 0; i < cell.length; i++) {
+                        const ally = cell[i];
+                        if (ally === this || ally.isDead || ally.faction !== this.faction) continue;
+                        
+                        // Verifica se o aliado está parado ou engajado
+                        const isAllyEngaged = ally.role === 'melee' && ally.target && !ally.target.isDead && (ally.lastVelocity.lengthSq() < 0.1 || ally.isAttacking);
+                        if (!isAllyEngaged) continue;
+                        
+                        const dx = px - ally.x;
+                        const dz = pz - ally.z;
+                        const distSq = dx * dx + dz * dz;
+                        
+                        if (distSq < avoidanceRadiusSq && distSq > 0.001) {
+                            const dist = Math.sqrt(distSq);
+                            
+                            // Vetor relativo deste para o aliado
+                            const relX = ally.x - px;
+                            const relZ = ally.z - pz;
+                            
+                            // Produto escalar frontal: se > 0, o aliado está na nossa frente
+                            const dotForward = relX * dir.x + relZ * dir.z;
+                            
+                            if (dotForward > 0) {
+                                // O aliado está na nossa frente! Aplica força lateral de desvio
+                                const latX = -dir.z;
+                                const latZ = dir.x;
+                                const dotLateral = relX * latX + relZ * latZ;
+                                
+                                // Desvia para o lado oposto ao que o aliado está posicionado lateralmente
+                                let steerSign = dotLateral > 0 ? -1 : 1;
+                                if (Math.abs(dotLateral) < 0.1) {
+                                    steerSign = (this.uid % 2 === 0) ? -1 : 1;
+                                }
+                                
+                                const force = ((avoidanceRadius - dist) / avoidanceRadius) * 4.0;
+                                repelX += latX * steerSign * force;
+                                repelZ += latZ * steerSign * force;
+                                
+                                // Empurrão radial se estiver extremamente perto para garantir separação física leve
+                                if (dist < 1.8) {
+                                    repelX += (dx / dist) * force * 0.5;
+                                    repelZ += (dz / dist) * force * 0.5;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Se houver alguma força de repulsão, combina com a direção de caminhada
+        if (repelX !== 0 || repelZ !== 0) {
+            _tmpVec3C.set(dir.x + repelX, 0, dir.z + repelZ);
+            if (_tmpVec3C.lengthSq() > 0.001) {
+                return _tmpVec3C.normalize();
+            }
+        }
+
+        return dir;
+    }
+
+    applyKnockback(direction, force, duration, launchY = 0) {
+        this.knockback.copy(direction).normalize().multiplyScalar(force);
+        this.knockbackTimer = duration;
+        if (launchY > 0) {
+            this.launchVY = launchY;
+            this.launchKills = true;
+            // Velocidades angulares aleatórias para girar no ar
+            this.tumbleX = (Math.random() - 0.5) * 18;
+            this.tumbleY = (Math.random() - 0.5) * 12;
+            this.tumbleZ = (Math.random() - 0.5) * 18;
+        }
+    }
+
+    smoothTurn(targetAngle, delta, simSpeed) {
+        let diff = targetAngle - this.rotY;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        this.rotY += diff * Math.min(delta * 12.0 * simSpeed, 1.0);
+    }
+
+    updateLOD(cameraPos, maxDistSq, medDistSq) {
+        if (this.visibleSubMeshes !== undefined && (simulationFrame + this.uid) % 15 !== 0) return;
+
+        const dx = this.x - cameraPos.x;
+        const dy = this.y - cameraPos.y;
+        const dz = this.z - cameraPos.z;
+        const distSq = dx * dx + dy * dy + dz * dz;
+
+        let newLodLevel = 0;
+        if (lodEnabled && radius > 250) {
+            newLodLevel = 2;
+        } else if (lodEnabled && distSq > medDistSq) {
+            newLodLevel = 1;
+        } else {
+            newLodLevel = 0;
+        }
+
+        if (this.lodLevel !== newLodLevel || this.visibleSubMeshes === undefined) {
+            this.lodLevel = newLodLevel;
+            this.visibleSubMeshes = null; // Reset cache so instanced renderer updates immediately
+
+            if (this.lodLevel === 2) {
+                if (this.lodPrimitive && !this.lodPrimitive.visible) this.lodPrimitive.visible = true;
+                if (this.head && this.head.visible) this.head.visible = false;
+                if (this.torso && this.torso.visible) this.torso.visible = false;
+                if (this.armL && this.armL.visible) this.armL.visible = false;
+                if (this.armR && this.armR.visible) this.armR.visible = false;
+                if (this.legL && this.legL.visible) this.legL.visible = false;
+                if (this.legR && this.legR.visible) this.legR.visible = false;
+                if (this.weapon && this.weapon.visible) this.weapon.visible = false;
+                if (this.shield && this.shield.visible) this.shield.visible = false;
+                if (this.quiver && this.quiver.visible) this.quiver.visible = false;
+                if (this.bow && this.bow.visible) this.bow.visible = false;
+                if (this.napoleonicGltf && this.napoleonicGltf.visible) this.napoleonicGltf.visible = false;
+            } else if (this.lodLevel === 1) {
+                if (this.lodPrimitive && this.lodPrimitive.visible) this.lodPrimitive.visible = false;
+                if (this.head && !this.head.visible) this.head.visible = true;
+                if (this.torso && !this.torso.visible) this.torso.visible = true;
+                if (this.weapon && !this.weapon.visible) this.weapon.visible = true;
+                if (this.shield && !this.shield.visible) this.shield.visible = true;
+                if (this.quiver && !this.quiver.visible) this.quiver.visible = true;
+                if (this.bow && !this.bow.visible) this.bow.visible = true;
+                if (this.armL && this.armL.visible) this.armL.visible = false;
+                if (this.armR && this.armR.visible) this.armR.visible = false;
+                if (this.legL && this.legL.visible) this.legL.visible = false;
+                if (this.legR && this.legR.visible) this.legR.visible = false;
+                if (this.napoleonicGltf && !this.napoleonicGltf.visible) this.napoleonicGltf.visible = true;
+            } else {
+                if (this.lodPrimitive && this.lodPrimitive.visible) this.lodPrimitive.visible = false;
+                if (this.head && !this.head.visible) this.head.visible = true;
+                if (this.torso && !this.torso.visible) this.torso.visible = true;
+                if (this.weapon && !this.weapon.visible) this.weapon.visible = true;
+                if (this.shield && !this.shield.visible) this.shield.visible = true;
+                if (this.quiver && !this.quiver.visible) this.quiver.visible = true;
+                if (this.bow && !this.bow.visible) this.bow.visible = true;
+                if (this.armL && !this.armL.visible) this.armL.visible = true;
+                if (this.armR && !this.armR.visible) this.armR.visible = true;
+                if (this.legL && !this.legL.visible) this.legL.visible = true;
+                if (this.legR && !this.legR.visible) this.legR.visible = true;
+                if (this.napoleonicGltf && !this.napoleonicGltf.visible) this.napoleonicGltf.visible = true;
+            }
+        }
+    }
+
+    update(opponents, delta, simSpeed) {
+        if (this.isDead) return;
+
+        const prevX = this.x;
+        const prevZ = this.z;
+
+        if (this._terrainSpeed === undefined) {
+            this._terrainSpeed = 1.0;
+            this._inMud = false;
+            this._atWaterEdge = false;
+        }
+
+        if ((simulationFrame + this.uid) % 12 === 0) {
+            let terrainSpeed = 1.0;
+            let inMud = false;
+            for (let i = 0; i < muds.length; i++) {
+                const dx = prevX - muds[i].x;
+                const dz = prevZ - muds[i].z;
+                if (dx * dx + dz * dz < muds[i].r * muds[i].r) {
+                    terrainSpeed = 0.4;
+                    inMud = true;
+                    break;
+                }
+            }
+            this._terrainSpeed = terrainSpeed;
+            this._inMud = inMud;
+
+            let atWaterEdge = false;
+            for (let i = 0; i < lakes.length; i++) {
+                const dx = prevX - lakes[i].x;
+                const dz = prevZ - lakes[i].z;
+                const distSq = dx * dx + dz * dz;
+                const r = lakes[i].r;
+                if (distSq < (r + 1) * (r + 1) && distSq > (r - 2) * (r - 2)) {
+                    atWaterEdge = true;
+                    break;
+                }
+            }
+            this._atWaterEdge = atWaterEdge;
+        }
+
+        const terrainSpeed = this._terrainSpeed;
+        const inMud = this._inMud;
+        const atWaterEdge = this._atWaterEdge;
+
+        if (atWaterEdge && this.lastVelocity.lengthSq() > 0.0001 && Math.random() < 0.1 * delta * 60) {
+            createWaterSplash(this);
+        }
+
+        this.animTime += delta * 15 * simSpeed * terrainSpeed;
+
+        if (this.attackCooldown > 0) {
+            this.attackCooldown -= delta * simSpeed;
+        }
+
+        if (this.stuckDuration > 0) {
+            this.stuckDuration -= delta * simSpeed;
+        }
+
+        this.updateFlash(delta);
+
+        if (this.isAttacking) {
+            this.updateAttackLogic(delta, simSpeed);
+        }
+
+        if (this.morale <= 4 && !this.isFleeing && !this.isPusher) {
+            this.isFleeing = true;
+            this.hasRetreated50m = false;
+            this.fleeStartX = this.x;
+            this.fleeStartZ = this.z;
+            this.isAttacking = false;
+            this.target = null;
+        }
+
+        if (this.isFleeing) {
+            if (!this.hasRetreated50m) {
+                const dx = this.x - this.fleeStartX;
+                const dz = this.z - this.fleeStartZ;
+                if (dx * dx + dz * dz >= 2500) {
+                    this.hasRetreated50m = true;
+                    this.fleeTimer = 0;
+                    this.lastVelocity.set(0, 0, 0);
+                    this.isTryingToMove = false;
+                } else {
+                    const dirX = armies[this.faction].dirX;
+                    let moveDir = _tmpVec3D.set(dirX, 0, 0);
+                    moveDir = this.getAvoidanceDir(moveDir);
+                    this.lastVelocity.copy(moveDir).multiplyScalar(this.speed * 1.3);
+                    this.lastTargetAngle = Math.atan2(moveDir.x, moveDir.z);
+                    this.isTryingToMove = true;
+                }
+            } else {
+                this.lastVelocity.set(0, 0, 0);
+                this.isTryingToMove = false;
+                this.fleeTimer += delta * simSpeed;
+                if (this.fleeTimer >= 10.0) {
+                    this.morale++;
+                    this.fleeTimer = 0;
+                    if (this.morale >= 7) {
+                        this.isFleeing = false;
+                    }
+                }
+            }
+        } else {
+            // --- TIME SLICING: IA pesada, desvios e colisões contra troncos/árvores divididos em grupos rotativos ---
+            // LOD 2 (invisíveis) recebem IA a cada 9 frames; LOD 0-1 a cada 3 frames
+            const sliceMod = this.lodLevel >= 2 ? 9 : 3;
+            const isHeavyFrame = ((simulationFrame + this.uid) % sliceMod === 0);
+            if (isHeavyFrame) {
+                this.updateHeavyAIAndPhysics(opponents, delta, simSpeed);
+            }
+        }
+
+        // --- APLICAÇÃO DO MOVIMENTO ---
+        if (this.knockbackTimer > 0) {
+            this.x += this.knockback.x * delta * simSpeed; this.y += this.knockback.y * delta * simSpeed; this.z += this.knockback.z * delta * simSpeed;
+            this.knockback.multiplyScalar(Math.pow(0.85, delta * 60));
+            this.knockbackTimer -= delta * simSpeed;
+            if (this.lodLevel === 0) {
+                
+            }
+        } else {
+            this.x += this.lastVelocity.x * delta * simSpeed * terrainSpeed;
+            this.z += this.lastVelocity.z * delta * simSpeed * terrainSpeed;
+
+            if (this.lastVelocity.lengthSq() > 0.0001) {
+                if (this.lodLevel === 0) {
+                    
+                }
+                this.smoothTurn(this.lastTargetAngle, delta, simSpeed);
+            } else {
+                if (!this.isAttacking && this.lodLevel === 0) {
+                    
+                }
+            }
+        }
+
+        // Ajuste de altura no terreno e limite de arena
+        if (this.lastVelocity.lengthSq() > 0.0001 || this.knockbackTimer > 0 || this.launchVY !== 0) {
+            const heightFreq = this.lodLevel >= 2 ? 15 : 3;
+            if ((simulationFrame + this.uid) % heightFreq === 0 || this.launchVY !== 0) {
+                this.terrainY = getTerrainHeight(this.x, this.z);
+            }
+        }
+        const baseHeight = inMud ? 0.8 : 1.5;
+        if (this.launchVY !== 0 || this.y > this.terrainY + baseHeight + 0.05) {
+            // Guerreiro no ar: aplica gravidade e gira
+            this.launchVY -= 9.8 * delta * simSpeed;
+            this.y += this.launchVY * delta * simSpeed;
+            this.rotX += this.tumbleX * delta * simSpeed;
+            this.rotY += this.tumbleY * delta * simSpeed;
+            this.rotZ += this.tumbleZ * delta * simSpeed;
+            if (this.y <= this.terrainY + baseHeight) {
+                this.y = this.terrainY + baseHeight;
+                this.launchVY = 0;
+                this.tumbleX = 0; this.tumbleY = 0; this.tumbleZ = 0;
+                this.rotX = 0; this.rotZ = 0;
+                if (this.launchKills) {
+                    this.launchKills = false;
+                    this.takeDamage(9999, null);
+                    return;
+                }
+            }
+        } else {
+            this.y = this.terrainY + baseHeight;
+        }
+        this.keepInsideArena();
+
+        // Lógica de stuck (travado)
+        if (this.isTryingToMove) {
+            const dx = this.x - prevX;
+            const dz = this.z - prevZ;
+            const distMovedSq = dx * dx + dz * dz;
+
+            const expectedDist = this.speed * delta * simSpeed;
+            const thresholdSq = (expectedDist * 0.1) * (expectedDist * 0.1);
+
+            if (distMovedSq < thresholdSq || distMovedSq < 0.0001) {
+                this.stuckTimer += delta * simSpeed;
+                if (this.stuckTimer >= 1.5) { // percebe que travou mais rapido
+                    this.stuckDuration = 2.5; // contorna por mais tempo
+                    this.stuckAngleOffset = (Math.random() > 0.5) ? Math.PI / 2 : -Math.PI / 2;
+                    this.stuckTimer = 0;
+                }
+            } else {
+                this.stuckTimer = Math.max(0, this.stuckTimer - delta * simSpeed * 2);
+            }
+        } else {
+            this.stuckTimer = 0;
+        }
+    }
+
+    updateHeavyAIAndPhysics(opponents, delta, simSpeed) {
+        let allOpponentsDead = (opponents.length === 0);
+
+        if (allOpponentsDead) {
+            this.target = null;
+            this.lastVelocity.set(0, 0, 0);
+            this.isTryingToMove = false;
+            this.isAttacking = false;
+            return;
+        }
+
+        // --- ARVORE DE COMPORTAMENTO (BEHAVIOR TREE) ---
+        // Seletor Root: Executa sequências de comportamento de acordo com a prioridade das ações.
+        // Isso organiza as decisões de forma modular, modularizando os ramos do cérebro do guerreiro.
+        if (this.evaluatePusherBehavior(opponents, delta, simSpeed)) return;
+        if (this.evaluateCombatBehavior(opponents, delta, simSpeed)) return;
+
+        // Fallback: Se nenhuma ramificação for selecionada, garanta inércia
+        this.lastVelocity.set(0, 0, 0);
+        this.isTryingToMove = false;
+    }
+
+    // --- ARVORE DE COMPORTAMENTO: COMPORTAMENTO DE EMPURRADOR DE CATAPULTA (SEQUÊNCIA/SELETOR) ---
+    evaluatePusherBehavior(opponents, delta, simSpeed) {
+        if (!this.isPusher || !this.catapult || this.catapult.isDead) return false;
+
+        const cat = this.catapult;
+        // Se a catapulta está se movendo, o pusher apenas acompanha o movimento fisicamente
+        const hasTarget = cat.hasEnemyInStopRange ? cat.hasEnemyInStopRange(opponents) : cat.hasEnemyInRange(opponents);
+        const hasPusherAlive = cat.pushers.some(p => !p.isDead);
+        const catIsMoving = !hasTarget && hasPusherAlive;
+
+        if (catIsMoving) {
+            resolveLogCollisions(this);
+            this.isTryingToMove = true;
+            return true; // Sucesso (Nó executado com prioridade)
+        }
+
+        // Defende a catapulta se ela não estiver se movendo e houver inimigos extremamente próximos dela
+        let nearestEnemy = null;
+        let minDistSq = 18 * 18;
+        const cx = cat.mesh.position.x;
+        const cz = cat.mesh.position.z;
+
+        for (let i = 0; i < opponents.length; i++) {
+            const e = opponents[i];
+            if (e.isDead) continue;
+            const dx = e.x - cx;
+            const dz = e.z - cz;
+            const distSq = dx * dx + dz * dz;
+            if (distSq < minDistSq) {
+                minDistSq = distSq;
+                nearestEnemy = e;
+            }
+        }
+
+        if (nearestEnemy) {
+            this.target = nearestEnemy;
+            return false; // Continua para o comportamento normal de combate utilizando o novo alvo
+        } else {
+            // Se não houver perigos próximos, retorna/mantém-se na posição de empurrar
+            const dir = armies[this.faction].catapultDir;
+            const offsetZ = (this.uid % 2 === 0) ? -1.2 : 1.2;
+            const tx = cx - dir * 3.4;
+            const tz = cz + offsetZ;
+
+            const dx = tx - this.x;
+            const dz = tz - this.z;
+            const distSq = dx * dx + dz * dz;
+            if (distSq > 0.5) {
+                this.target = null;
+                this.lastVelocity.set(dx, 0, dz).normalize().multiplyScalar(this.speed);
+                this.lastTargetAngle = Math.atan2(dx, dz) + Math.PI;
+                this.isTryingToMove = true;
+            } else {
+                this.lastVelocity.set(0, 0, 0);
+                this.target = null;
+                this.isTryingToMove = false;
+            }
+            resolveLogCollisions(this);
+            return true; // Sucesso
+        }
+    }
+
+    // --- ARVORE DE COMPORTAMENTO: COMPORTAMENTO DE COMBATE E SEGMENTAÇÃO DE ALVOS (SELETOR) ---
+    evaluateCombatBehavior(opponents, delta, simSpeed) {
+        this.updateAI(opponents);
+
+        this.isTryingToMove = false;
+        this.isKiting = false;
+
+        // Verifica se o alvo é válido e está vivo
+        if (this.target && !this.target.isDead) {
+            const dx = this.target.x - this.x;
+            const dz = this.target.z - this.z;
+            const distSq = dx * dx + dz * dz;
+
+            this.lastTargetAngle = Math.atan2(dx, dz) + Math.PI;
+
+            const targetRadius = this.target.radius || 0.8;
+            const isMeleeCombatant = (this.role === 'melee' || this.isDaggerArcher);
+            const actualAttackRange = isMeleeCombatant ? (this.attackRange - 0.8 + targetRadius) : this.attackRange;
+            const actualAttackRangeSq = actualAttackRange * actualAttackRange;
+
+            if (isMeleeCombatant) {
+                if (distSq > actualAttackRangeSq) {
+                    this.moveTowardsTarget(delta, simSpeed);
+                } else {
+                    this.lastVelocity.set(0, 0, 0);
+                    this.stopAndAttack(simSpeed);
+                }
+            } else {
+                // Comportamento de Atirador (Arqueiro / Mosqueteiro)
+                if (distSq < this.keepDistanceRange * this.keepDistanceRange) {
+                    this.kiteTarget(delta, simSpeed);
+                    this.isKiting = true;
+                } else if (distSq > actualAttackRangeSq) {
+                    this.moveTowardsTarget(delta, simSpeed);
+                } else {
+                    this.lastVelocity.set(0, 0, 0);
+                    this.stopAndAttack(simSpeed);
+                }
+            }
+        } else {
+            // Se o alvo morreu ou se tornou nulo, pare imediatamente qualquer animação ou movimento ofensivo
+            this.target = null;
+            this.lastVelocity.set(0, 0, 0);
+            this.isAttacking = false;
+        }
+
+        resolveLogCollisions(this);
+        return true;
+    }
+
+    updateAI(opponents) {
+        if (!this.aiTick) this.aiTick = 0;
+        this.aiTick++;
+        
+        if ((this.role === 'melee' || this.isDaggerArcher) && this.target && !this.target.isDead) {
+            const dx = this.target.x - this.x;
+            const dz = this.target.z - this.z;
+            const distSq = dx * dx + dz * dz;
+            const targetRadius = this.target.radius || 0.8;
+            const actualAttackRange = this.attackRange - 0.8 + targetRadius;
+            if (distSq <= actualAttackRange * actualAttackRange) {
+                // Já engajado em combate corpo a corpo com oponente vivo. Mantém foco para evitar custos de busca e manter as fileiras organizadas!
+                return;
+            }
+        }
+        
+        const aiFreq = this.lodLevel >= 2 ? 24 : (this.lodLevel === 1 ? 12 : 6);
+        if (this.aiTick % aiFreq !== 0 && this.target && !this.target.isDead) return;
+
+        const findFreq = this.lodLevel >= 2 ? 96 : (this.lodLevel === 1 ? 48 : 24);
+        if (!this.target || this.target.isDead || this.aiTick % findFreq === 0) {
+            let bestTarget = null;
+
+            // 1. Tenta buscar inimigo vivo próximo usando o Grid Espacial (O(1))
+            if (window.findNearestEnemyInGrid) {
+                bestTarget = window.findNearestEnemyInGrid(this);
+            }
+
+            // 2. Se não encontrar nenhum inimigo próximo no Grid (armadas distantes no início),
+            // escolhe um oponente vivo aleatório para marchar na direção dele.
+            if (!bestTarget && opponents.length > 0) {
+                for (let attempt = 0; attempt < 5; attempt++) {
+                    const idx = Math.floor(Math.random() * opponents.length);
+                    const enemy = opponents[idx];
+                    if (enemy && !enemy.isDead) {
+                        bestTarget = enemy;
+                        break;
+                    }
+                }
+                // Fallback seguro se as tentativas aleatórias não acharem ninguém vivo
+                if (!bestTarget) {
+                    for (let i = 0; i < opponents.length; i++) {
+                        const enemy = opponents[i];
+                        if (enemy && !enemy.isDead) {
+                            bestTarget = enemy;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 3. Se houver catapultas inimigas e formos Flankers ou DaggerArchers (ou a cada tick longo de busca),
+            // prioriza atacar a catapulta se ela estiver ao alcance visual ou estratégico.
+            const catapults = battleManager.getCatapults();
+            if (catapults.length > 0 && (this.isFlanker || this.isDaggerArcher || this.aiTick % 96 === 0)) {
+                const p1 = this;
+                for (let i = 0; i < catapults.length; i++) {
+                    const cat = catapults[i];
+                    if (cat.isDead || cat.faction === this.faction) continue;
+
+                    const catPos = cat.mesh.position;
+                    const dx = p1.x - catPos.x;
+                    const dz = p1.z - catPos.z;
+                    const dSq = dx * dx + dz * dz;
+
+                    // Se a catapulta estiver próxima (~40 unidades) ou se formos flanqueadores/dagger archers dedicados
+                    if (dSq < 1600 || this.isFlanker || this.isDaggerArcher) {
+                        bestTarget = cat;
+                        break;
+                    }
+                }
+            }
+
+            if (bestTarget) {
+                this.target = bestTarget;
+            }
+        }
+    }
+
+    moveTowardsTarget(delta, simSpeed) {
+        if (!this.target) {
+            this.lastVelocity.set(0, 0, 0);
+            return;
+        }
+        let dir = _tmpVec3A.subVectors(this.target, this).normalize();
+
+        const hash = this.uid;
+        // Leve variação para não ficarem milimetricamente colados, mas sem espalhar na largada
+        const sideAngle = (hash % 10 - 5) * 0.05;
+        dir.applyAxisAngle(_axisY, sideAngle);
+
+        dir = this.getAvoidanceDir(dir);
+
+        this.lastVelocity.set(dir.x * this.speed, 0, dir.z * this.speed);
+        this.isTryingToMove = true;
+    }
+
+    kiteTarget(delta, simSpeed) {
+        if (!this.target) {
+            this.lastVelocity.set(0, 0, 0);
+            return;
+        }
+        let dir = _tmpVec3A.subVectors(this, this.target).normalize();
+
+        dir = this.getAvoidanceDir(dir);
+
+        this.lastVelocity.set(dir.x * this.speed * 0.7, 0, dir.z * this.speed * 0.7);
+        this.isTryingToMove = true;
+    }
+
+    keepInsideArena() {
+        const limitX = sizeX / 2 - 2;
+        const limitZ = sizeZ / 2 - 2;
+
+        if (this.x < -limitX) this.x = -limitX;
+        if (this.x > limitX) this.x = limitX;
+        if (this.z < -limitZ) this.z = -limitZ;
+        if (this.z > limitZ) this.z = limitZ;
+    }
+
+    stopAndAttack(simSpeed) {
+
+        const isShooter = (this.role === 'archer' || isNapoleonicTheme()) && !this.isDaggerArcher;
+        if (!isShooter) {
+            const isTargetCatapult = (this.target && this.target.constructor.name === 'Catapult');
+            if (isTargetCatapult) {
+                if (this.attackCooldown <= 0 && !this.isAttacking) {
+                    this.isAttacking = true;
+                    this.attackAnimProgress = 0;
+                }
+            } else {
+                if (this.attackCooldown <= 0 && !this.isAttacking && !this.target.isAttacking) {
+                    const myRoll = Math.floor(Math.random() * 6) + 1;
+                    const targetRoll = Math.floor(Math.random() * 6) + 1;
+
+                    if (myRoll > targetRoll) {
+                        this.isAttacking = true;
+                        this.attackAnimProgress = 0;
+                    } else if (targetRoll > myRoll) {
+                        this.target.isAttacking = true;
+                        this.target.attackAnimProgress = 0;
+                        this.attackCooldown = 1.2;
+                    } else {
+                        _tmpVec3A.subVectors(this.target, this).normalize();
+                        _tmpVec3B.copy(_tmpVec3A).negate();
+                        this.applyKnockback(_tmpVec3B, 8.0, 0.3);
+                        this.target.applyKnockback(_tmpVec3A, 8.0, 0.3);
+
+                        this.target.attackCooldown = 0.5;
+                        this.attackCooldown = 1.0;
+
+                        createSparks(this.target);
+                        playClangSound(0.2);
+                    }
+                }
+            }
+        } else {
+            if (this.attackCooldown <= 0 && !this.isAttacking) {
+                this.isAttacking = true;
+                this.attackAnimProgress = 0;
+            }
+        }
+    }
+
+
+    takeDamage(amount, attacker) {
+        this.hp -= amount;
+        this.morale = Math.max(1, this.morale - 1);
+        this.flashTimer = 0.12; // Inicia flash sem setTimeout
+
+        createBlood(this);
+
+        if (attacker && attacker.role === 'melee') {
+            _tmpVec3A.subVectors(this, attacker).normalize();
+            this.applyKnockback(_tmpVec3A, 4.5, 0.2);
+        }
+
+        if (this.hp <= 0 && !this.isDead) {
+            this.die(attacker);
+        }
+    }
+
+    updateFlash(delta) {
+        if (this.flashTimer > 0) {
+            this.flashTimer -= delta;
+            if (this.flashTimer <= 0) {
+                this.flashTimer = 0;
+            }
+        }
+    }
+
+    die(killer) {
+        this.isDead = true;
+        this.isAttacking = false;
+        this.isTryingToMove = false;
+        this.isKiting = false;
+        this.target = null;
+        this.lastVelocity.set(0, 0, 0);
+
+        playDeathSound();
+        battleManager.setKills(battleManager.getKills() + 1);
+
+        HUD.updateKills(battleManager.getKills());
+
+        armies[this.faction].addDeadCount();
+        const idx = armies[this.faction].list.indexOf(this);
+        if (idx !== -1) armies[this.faction].list.splice(idx, 1);
+        HUD.updateArmy(this.faction, armies[this.faction].list.length);
+
+        battleManager.getDeadWarriors().push(this);
+
+        this.rotZ = Math.PI / 2 * (Math.random() > 0.5 ? 1 : -1);
+        this.y = getTerrainHeight(this.x, this.z) + 0.2;
+
+    }
+
+    fadeAndSink(delta) {
+        this.y -= delta * 0.3;
+        if (this.y < -5) {
+            if (this.uniqueBodyMat) {
+                this.uniqueBodyMat.dispose();
+            }
+            return true;
+        }
+        return false;
+    }
+
+
+    updateAttackLogic(delta, simSpeed) {
+        if (!this.isAttacking) return;
+        const isShooter = (this.role === 'archer' || isNapoleonicTheme()) && !this.isDaggerArcher;
+        const animSpeed = isShooter ? (isNapoleonicTheme() ? 0.85 : 6) : 12;
+        this.attackAnimProgress += delta * animSpeed * simSpeed;
+
+        if (this.attackAnimProgress >= 1.0) {
+            this.isAttacking = false;
+            this.attackCooldown = isShooter ? (isNapoleonicTheme() ? (9.0 + Math.random() * 2.0) : (1.8 + Math.random() * 0.6)) : (0.8 + Math.random() * 0.5);
+
+            if (this.target && !this.target.isDead) {
+                if (!isShooter) {
+                    const isDagger = this.isDaggerArcher;
+                    const dmg = isDagger ? (22 + Math.floor(Math.random() * 18)) : (15 + Math.floor(Math.random() * 15));
+                    this.target.takeDamage(dmg, this);
+                    this.morale = Math.min(10, this.morale + 1);
+                    createSparks(this.target);
+                    playClangSound(dmg / 30);
+                } else {
+                    const spawnPos = new THREE.Vector3(this.x, this.y + 0.8, this.z);
+                    const damage = isNapoleonicTheme() ? (35 + Math.floor(Math.random() * 15)) : (12 + Math.floor(Math.random() * 8));
+                    
+                    let wasTreeDefended = false;
+                    if (typeof checkNearTree === 'function') {
+                        wasTreeDefended = checkNearTree(this.target, 3.5);
+                    }
+                    
+                    let isBlocked = false;
+                    if (wasTreeDefended && Math.random() < 0.4) {
+                        isBlocked = true;
+                    } else if (this.target.role === 'melee' && Math.random() < 0.3) {
+                        isBlocked = true;
+                        wasTreeDefended = false;
+                    }
+
+                    if (typeof playArrowReleaseSound === 'function') {
+                        playArrowReleaseSound();
+                    }
+
+                    const arrow = ArrowPool.get(spawnPos, this.target, damage, this.faction, isBlocked, wasTreeDefended, this);
+                    battleManager.addArrow(arrow);
+                }
+            }
+        }
+    }
+    applyPoseToDummy(dummy) {
+        const lodPrimitive = dummy.getObjectByName("lodPrimitive");
+        if (this.lodLevel > 0) {
+            if (lodPrimitive) lodPrimitive.visible = true;
+            for (let i = 0; i < dummy.children.length; i++) {
+                if (dummy.children[i] !== lodPrimitive) dummy.children[i].visible = false;
+            }
+            return;
+        }
+
+        if (lodPrimitive) lodPrimitive.visible = false;
+        for (let i = 0; i < dummy.children.length; i++) {
+            if (dummy.children[i] !== lodPrimitive) dummy.children[i].visible = true;
+        }
+
+        const torso = dummy.getObjectByName("torso");
+        const armL = dummy.getObjectByName("armL");
+        const armR = dummy.getObjectByName("armR");
+        const legL = dummy.getObjectByName("legL");
+        const legR = dummy.getObjectByName("legR");
+        const napoleonicGltf = dummy.getObjectByName("napoleonic_gltf");
+        const bowGroup = dummy.getObjectByName("bowGroup");
+        const bowString = dummy.getObjectByName("bowString");
+        const torchGroup = dummy.getObjectByName("torchGroup");
+
+        if (torchGroup) {
+            torchGroup.visible = (this.isPusher && this.hasTorch);
+        }
+        if (bowGroup && (this.isDaggerArcher || (this.isPusher && isNapoleonicTheme()))) {
+            bowGroup.visible = false;
+        }
+
+        if (this.isDead) {
+            if (armL) armL.rotation.x = 0;
+            if (armR) armR.rotation.x = 0;
+            if (legL) legL.rotation.x = 0;
+            if (legR) legR.rotation.x = 0;
+            return;
+        }
+
+        if (this.isAttacking) {
+            const isShooter = (this.role === 'archer' || isNapoleonicTheme()) && !this.isDaggerArcher;
+            if (!isShooter) {
+                const swing = Math.sin(this.attackAnimProgress * Math.PI);
+                if (armR) {
+                    armR.rotation.x = Math.PI / 6 + swing * 1.5;
+                    armR.position.z = -swing * 0.4;
+                }
+            } else {
+                const swing = Math.sin(this.attackAnimProgress * Math.PI);
+                if (napoleonicGltf) {
+                    napoleonicGltf.rotation.x = -0.2 - swing * 0.15;
+                    napoleonicGltf.rotation.z = swing * 0.05;
+                    napoleonicGltf.position.y = 0;
+                } else if (isNapoleonicTheme()) {
+                    if (armL) {
+                        armL.rotation.set(-1.2, 0.6, 0);
+                        armL.position.set(-0.5, 1.275, 0.2);
+                    }
+                    if (armR) {
+                        armR.rotation.set(-1.4, -0.4, 0);
+                        armR.position.set(0.5, 1.275, 0.2);
+                    }
+                    if (bowGroup) {
+                        bowGroup.rotation.set(-0.35, -0.6, 0);
+                        bowGroup.position.set(0.2, -0.9, -0.3);
+                    }
+                } else {
+                    if (armL) {
+                        armL.rotation.x = -Math.PI / 2;
+                        armL.rotation.y = -Math.PI / 6;
+                    }
+                    if (armR) {
+                        armR.rotation.x = -Math.PI / 2.5;
+                        armR.position.z = swing * 0.45;
+                    }
+                    if (bowString) bowString.scale.z = 1.0 + swing * 3.5;
+                }
+            }
+        } else if (this.isTryingToMove) {
+            const modifier = this.knockback && this.knockback.lengthSq() > 0 ? -1 : 1;
+            const animTime = this.animTime || 0;
+            const swing = Math.sin(animTime) * 0.7 * modifier;
+            
+            if (napoleonicGltf) {
+                napoleonicGltf.rotation.z = Math.sin(animTime) * 0.08;
+                napoleonicGltf.rotation.x = -0.12;
+                napoleonicGltf.position.y = Math.abs(Math.sin(animTime * 2)) * 0.08;
+            } else {
+                if (legL) legL.rotation.x = swing;
+                if (legR) legR.rotation.x = -swing;
+                if (isNapoleonicTheme()) {
+                    if (armL) {
+                        armL.rotation.set(swing * 0.5, 0, Math.PI / 12);
+                        armL.position.set(-0.85, 1.275, 0);
+                    }
+                    if (armR) {
+                        armR.rotation.set(0.43, 0, -0.05);
+                        armR.position.set(0.85, 1.275, 0);
+                    }
+                    if (bowGroup) {
+                        bowGroup.rotation.set(-1.55, 0, 0);
+                        bowGroup.position.set(0, -0.1, -0.3);
+                    }
+                } else {
+                    if (armL) armL.rotation.x = -swing * 0.5;
+                    if (armR) armR.rotation.x = swing * 0.5;
+                }
+                if (torso) {
+                    torso.position.y = isNapoleonicTheme() ? 0.525 + Math.abs(Math.sin(animTime * 2)) * 0.15 : Math.abs(Math.sin(animTime * 2)) * 0.15;
+                }
+            }
+        } else {
+            const animTime = this.animTime || 0;
+            if (napoleonicGltf) {
+                napoleonicGltf.rotation.z = Math.sin(animTime * 0.3) * 0.015;
+                napoleonicGltf.rotation.x = 0;
+                napoleonicGltf.position.y = 0;
+            } else {
+                if (legL) legL.rotation.x = 0;
+                if (legR) legR.rotation.x = 0;
+                if (torso) torso.position.y = isNapoleonicTheme() ? 0.525 : 0;
+                
+                if (isNapoleonicTheme()) {
+                    if (armL) {
+                        armL.rotation.set(0, 0, Math.PI / 12);
+                        armL.position.set(-0.85, 1.275, 0);
+                    }
+                    if (armR) {
+                        armR.rotation.set(0.43, 0, -0.05);
+                        armR.position.set(0.85, 1.275, 0);
+                    }
+                    if (bowGroup) {
+                        bowGroup.rotation.set(-1.55, 0, 0);
+                        bowGroup.position.set(0, -0.1, -0.3);
+                    }
+                } else {
+                    const breathing = Math.sin(animTime * 0.2) * 0.1;
+                    if (armL) armL.rotation.z = -breathing;
+                    if (armR) armR.rotation.z = breathing;
+                    
+                    if (armR) armR.position.z = 0;
+                    if (armR) armR.rotation.x = 0;
+                    if (armL) armL.rotation.x = 0;
+                    if (armL) armL.rotation.y = 0;
+                    if (bowString) bowString.scale.z = 1.0;
+                }
+            }
+        }
+    }
+}

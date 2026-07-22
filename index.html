@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Simulador de Batalha Medieval 3D - Guerreiros & Arqueiros</title>
+    <!-- Tailwind CSS para um painel de controlo moderno -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <!-- CSS Externo -->
+    <link rel="stylesheet" href="MedievalBattles3D.css">
+</head>
+
+<body>
+
+    <!-- Ecrã de Carregamento & Diagnóstico -->
+    <div id="loader"
+        class="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center z-50 text-white gap-3 px-6 text-center">
+        <div class="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+        <p class="text-sm font-bold tracking-wider uppercase text-amber-500 animate-pulse" id="loader-text">A
+            inicializar arena tática 3D...</p>
+        <p class="text-xs text-slate-500 max-w-xs">Configurando relevo do terreno, física balística, obstáculos e
+            cobertura de floresta...</p>
+    </div>
+
+    <!-- HUD de Controlo Superior (Placar) -->
+    <!-- Indicador de FPS no Canto Superior Esquerdo -->
+    <div class="absolute top-4 left-4 z-10 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-lg border border-slate-700/50 shadow-lg flex items-center justify-center">
+        <span id="fps-counter-topleft" class="text-xs text-emerald-400 font-mono font-black">FPS: --</span>
+    </div>
+
+    <div
+        class="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex gap-4 md:gap-8 bg-slate-900/90 backdrop-blur-md px-6 py-2.5 rounded-full border border-slate-700/50 shadow-2xl items-center max-w-[95vw]">
+        <div class="flex items-center gap-3">
+            <div class="w-3.5 h-3.5 bg-blue-500 rounded-full animate-pulse"></div>
+            <div>
+                <p id="label-knights" class="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none">Cavaleiros</p>
+                <p id="count-knights" class="text-lg md:text-xl font-black text-blue-400 mt-0.5 leading-none">50</p>
+            </div>
+        </div>
+        <div class="h-6 w-[1px] bg-slate-700"></div>
+        <div class="text-center min-w-[50px]">
+            <p class="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none">Baixas</p>
+            <p id="count-kills" class="text-base md:text-lg font-bold text-amber-500 mt-0.5 leading-none">0</p>
+        </div>
+        <div class="h-6 w-[1px] bg-slate-700"></div>
+        <div class="flex items-center gap-3">
+            <div class="text-right">
+                <p id="label-goblins" class="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none">Goblins</p>
+                <p id="count-goblins" class="text-lg md:text-xl font-black text-red-400 mt-0.5 leading-none">50</p>
+            </div>
+            <div class="w-3.5 h-3.5 bg-red-500 rounded-full animate-pulse"></div>
+        </div>
+    </div>
+
+    <!-- Botão de Alternar Visibilidade do Painel (Otimizado para Toque) -->
+    <button id="floating-toggle-btn" onclick="togglePanel()"
+        class="absolute bottom-4 left-4 z-20 bg-slate-900/95 backdrop-blur-md px-4 py-2.5 rounded-xl border border-slate-700/50 text-white font-bold text-xs shadow-2xl flex items-center gap-1.5 active:scale-95 transition-all">
+        🙈 Ocultar Controles
+    </button>
+
+    <!-- Interface Principal Flutuante (Esquerda) -->
+    <div id="control-panel"
+        class="absolute bottom-16 left-4 z-10 max-w-sm w-[90vw] md:w-80 bg-slate-900/95 backdrop-blur-md p-4 rounded-2xl border border-slate-800 shadow-2xl flex flex-col gap-3.5 text-white max-h-[calc(60vh+110px)] md:max-h-[calc(70vh+110px)] overflow-y-auto transition-all duration-300">
+
+        <div class="flex justify-between items-center border-b border-slate-800 pb-1.5">
+            <h1 class="text-xs font-black tracking-wider uppercase text-amber-500">🛡️ Painel de Controlo</h1>
+            <span id="fps-counter" class="text-[10px] text-emerald-400 font-mono">-- FPS</span>
+        </div>
+
+        <!-- Seletor de Modelo Visual (Tema da Batalha) -->
+        <div class="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800 flex flex-col gap-1.5">
+            <p class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Modelo das Unidades</p>
+            <div class="grid grid-cols-3 gap-2">
+                <button onclick="setTheme('medieval')" id="btn-theme-medieval"
+                    class="theme-btn py-1.5 rounded-lg text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all flex flex-col items-center gap-0.5">
+                    🛡️ Medieval
+                </button>
+                <button onclick="setTheme('napoleonic')" id="btn-theme-napoleonic"
+                    class="theme-btn px-1.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-all flex flex-col items-center gap-0.5">
+                    💂 Napoleónico
+                </button>
+                <button onclick="setTheme('napoleonic_3d')" id="btn-theme-napoleonic_3d"
+                    class="theme-btn px-1.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-all flex flex-col items-center gap-0.5">
+                    🎖️ Nap. 3D
+                </button>
+            </div>
+        </div>
+
+        <!-- Secção de Ação Principal -->
+        <div class="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800 flex flex-col gap-2">
+            <p class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Ações de Simulação</p>
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="togglePause()" id="btn-pause"
+                    class="py-2.5 px-3 bg-amber-600 hover:bg-amber-500 text-xs font-black rounded-lg transition-all shadow-lg flex items-center justify-center gap-1.5 active:scale-95">
+                    <span id="pause-icon">▶️</span><span id="pause-text">Continuar</span>
+                </button>
+                <button onclick="resetBattle()"
+                    class="py-2.5 px-3 bg-amber-600 hover:bg-amber-500 text-xs font-black rounded-lg transition-all border border-amber-500/40 shadow-lg flex items-center justify-center gap-1.5 active:scale-95">
+                    <span>🔄</span>Reiniciar
+                </button>
+            </div>
+        </div>
+
+        <!-- Reforços Dinâmicos em Tempo Real -->
+        <div class="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800 flex flex-col gap-1.5">
+            <p class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Enviar Reforços Imediatos</p>
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="spawnReinforcements('knights', 50)" id="btn-reinf-knights"
+                    class="py-1.5 px-2 bg-blue-600/40 hover:bg-blue-600/60 text-[10px] font-bold rounded border border-blue-500/30 text-blue-200 active:scale-95 transition-all">
+                    ➕ 50 Cavaleiros
+                </button>
+                <button onclick="spawnReinforcements('goblins', 50)" id="btn-reinf-goblins"
+                    class="py-1.5 px-2 bg-red-600/40 hover:bg-red-600/60 text-[10px] font-bold rounded border border-red-500/30 text-red-200 active:scale-95 transition-all">
+                    ➕ 50 Goblins
+                </button>
+            </div>
+        </div>
+
+        <!-- Seletor de Tamanho do Exército Inicial -->
+        <div>
+            <div class="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+                <span>Tropas Iniciais (Cada Lado)</span>
+                <span id="units-val" class="text-amber-500 font-mono">500</span>
+            </div>
+            <input type="range" id="units-slider" min="100" max="5000" step="100" value="500"
+                class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500">
+        </div>
+
+        <!-- Seletor de Composição de Arqueiros -->
+        <div>
+            <div class="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+                <span>Composição de Arqueiros</span>
+                <span id="archer-ratio-val" class="text-amber-500 font-mono">30%</span>
+            </div>
+            <input type="range" id="archer-ratio-slider" min="0" max="100" step="10" value="30"
+                class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500">
+        </div>
+
+        <!-- Seletor de Flanqueadores -->
+        <div>
+            <div class="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+                <span>Flanqueadores</span>
+                <span id="flank-ratio-val" class="text-amber-500 font-mono">15%</span>
+            </div>
+            <select id="flank-ratio-select" class="w-full bg-slate-800 text-slate-300 rounded-lg p-1.5 text-xs border border-slate-700 outline-none">
+                <option value="15" selected>15%</option>
+                <option value="20">20%</option>
+                <option value="25">25%</option>
+                <option value="30">30%</option>
+            </select>
+        </div>
+
+        <!-- Seletor de Nuvens -->
+        <div>
+            <div class="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+                <span>Nuvens (Clima)</span>
+                <span id="clouds-val" class="text-amber-500 font-mono">200</span>
+            </div>
+            <input type="range" id="clouds-slider" min="0" max="1000" step="100" value="200"
+                class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500">
+        </div>
+
+        <!-- Seletor de Tamanho do Campo de Batalha -->
+        <div>
+            <div class="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+                <span>Tamanho do Campo</span>
+                <span id="arena-val" class="text-amber-500 font-mono">1000x500</span>
+            </div>
+            <input type="range" id="arena-slider" min="50" max="500" step="10" value="500"
+                class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500">
+        </div>
+
+        <!-- Troncos de Obstáculos -->
+        <div class="flex items-center justify-between bg-slate-950/50 p-2.5 rounded-xl border border-slate-800">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Troncos no Terreno</span>
+            <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="toggle-logs" checked class="sr-only peer">
+                <div
+                    class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500">
+                </div>
+            </label>
+        </div>
+
+        <!-- Otimização LOD -->
+        <div class="flex items-center justify-between bg-slate-950/50 p-2.5 rounded-xl border border-slate-800">
+            <div class="flex flex-col">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Otimização LOD</span>
+                <span class="text-[8px] text-slate-500">Ajusta detalhes pela distância</span>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="toggle-lod" checked onchange="toggleLOD(this.checked)" class="sr-only peer">
+                <div
+                    class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500">
+                </div>
+            </label>
+        </div>
+
+        <!-- Seletor de Ambiente / Iluminação -->
+        <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Clima &
+                Horário</label>
+            <div class="grid grid-cols-3 gap-2">
+                <button onclick="setEnvironment('dia')" id="btn-env-dia"
+                    class="env-btn px-1 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all flex flex-col items-center gap-0.5">
+                    <span>☀️</span>Dia
+                </button>
+                <button onclick="setEnvironment('sunset')" id="btn-env-sunset"
+                    class="env-btn px-1 py-1.5 rounded-lg text-xs font-semibold bg-orange-500/20 text-orange-300 border border-orange-500/30 transition-all flex flex-col items-center gap-0.5">
+                    <span>🌅</span>Ocaso
+                </button>
+                <button onclick="setEnvironment('noite')" id="btn-env-noite"
+                    class="env-btn px-1 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-all flex flex-col items-center gap-0.5">
+                    <span>🌙</span>Noite
+                </button>
+            </div>
+        </div>
+
+        <!-- Opções de Câmara -->
+        <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Controlo de
+                Câmara</label>
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="setCameraMode('orbit')" id="btn-cam-orbit"
+                    class="cam-btn py-1.5 rounded-lg text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30 transition-all">
+                    🔄 Livre/Táctico
+                </button>
+                <button onclick="setCameraMode('cinematic')" id="btn-cam-cinematic"
+                    class="cam-btn py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-all">
+                    🎥 Cinemática
+                </button>
+            </div>
+            <!-- Botões Rápidos de Zoom para Touch/Tablet -->
+            <div class="flex gap-2 mt-2" id="tablet-zoom-controls">
+                <button onclick="zoomCamera(-5)"
+                    class="flex-1 py-1 bg-slate-800 hover:bg-slate-700 text-xs rounded-lg font-bold border border-slate-700 text-slate-300 active:bg-slate-650 transition-all">🔍
+                    Zoom +</button>
+                <button onclick="zoomCamera(5)"
+                    class="flex-1 py-1 bg-slate-800 hover:bg-slate-700 text-xs rounded-lg font-bold border border-slate-700 text-slate-300 active:bg-slate-650 transition-all">🔍
+                    Zoom -</button>
+            </div>
+        </div>
+
+        <!-- Velocidade da Simulação -->
+        <div>
+            <div class="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+                <span>Velocidade de Combate</span>
+                <span id="speed-val" class="text-amber-500 font-mono">1.0x</span>
+            </div>
+            <input type="range" id="speed-slider" min="0" max="2" step="0.25" value="1"
+                class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500">
+        </div>
+
+        <!-- Ativar Som -->
+        <button onclick="toggleAudio()" id="btn-sound"
+            class="w-full py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition-all flex items-center justify-center gap-2">
+            <span id="sound-icon">🔇</span> Som Desativado
+        </button>
+    </div>
+
+    <!-- Modal Fim de Batalha -->
+    <div id="battle-end-modal" class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center hidden backdrop-blur-sm">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 transform scale-95 transition-all">
+            <h2 id="winner-title" class="text-2xl font-black text-amber-500 mb-2 tracking-wide uppercase text-center">Vitória!</h2>
+            <p class="text-sm text-slate-400 mb-6 text-center">O campo de batalha foi decidido.</p>
+            
+            <div class="w-full flex justify-between bg-slate-800/50 rounded-xl p-4 mb-3 border border-slate-700/50">
+                <div class="flex flex-col items-center">
+                    <span class="text-[10px] uppercase font-bold text-slate-500 mb-1">Cavaleiros</span>
+                    <span class="text-xs text-red-400 font-bold">Perdas</span>
+                    <span id="loss-knights" class="text-lg font-black text-slate-200">0</span>
+                </div>
+                <div class="w-px bg-slate-700"></div>
+                <div class="flex flex-col items-center">
+                    <span class="text-[10px] uppercase font-bold text-slate-500 mb-1">Goblins</span>
+                    <span class="text-xs text-red-400 font-bold">Perdas</span>
+                    <span id="loss-goblins" class="text-lg font-black text-slate-200">0</span>
+                </div>
+            </div>
+            
+            <button onclick="resetBattle(); document.getElementById('battle-end-modal').classList.add('hidden')" class="mt-4 w-full py-3 bg-amber-600 hover:bg-amber-500 text-sm font-black rounded-xl transition-all shadow-lg active:scale-95">
+                Nova Batalha
+            </button>
+        </div>
+    </div>
+
+    <script src="js/CONFIG.js"></script>
+    <script src="js/BattleManager.js"></script>
+    <script src="js/HUD.js"></script>
+    <script src="js/scene.js"></script>
+    <script src="js/camera-controls.js"></script>
+    <script src="js/audio.js"></script>
+    <script src="js/lighting.js"></script>
+    <script src="js/textures.js"></script>
+    <script src="js/arena.js"></script>
+    <script src="js/geometries.js"></script>
+    <script src="js/pools.js"></script>
+    <script src="js/arrow.js"></script>
+    <script src="js/ai.js"></script>
+    <script src="js/warrior.js"></script>
+    <script src="js/boulder.js"></script>
+    <script src="js/catapult.js"></script>
+    <script src="js/collision.js"></script>
+    <script src="js/particles.js"></script>
+    <script src="js/battle.js"></script>
+    <script src="js/game-loop.js"></script>
+    <script src="js/main.js"></script>
+</body>
+
+</html>

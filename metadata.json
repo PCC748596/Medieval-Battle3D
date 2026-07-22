@@ -1,0 +1,6 @@
+{
+  "name": "MedievalBattles3D",
+  "description": "Um aplicativo em branco para MedievalBattles3D",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
