@@ -18,6 +18,7 @@ class Catapult {
         this.maxHp = 500;
         this.isDead = false;
         this.attackerCount = 0;
+        this.attackers = new Set();
         this.fireRate = 12;
         this.fireCooldown = 3 + Math.random() * 6;
         this.damage = 90;
@@ -503,9 +504,20 @@ class Catapult {
     }
 
     die() {
+        if (this.isDead) return;
         this.isDead = true;
-        scene.remove(this.mesh);
+        this.isAiming = false;
+        this.isFiring = false;
+        
+        // Transformar todos os materiais em algo queimado/preto
+        const charredMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+        this.mesh.traverse(child => {
+            if (child.isMesh) {
+                child.material = charredMat;
+            }
+        });
+        
         createSparks(this.mesh.position, false);
-        window.armies[this.faction].addDeadCount();
+        // Não removemos o mesh, fica como carcaça no campo
     }
 }

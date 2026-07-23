@@ -148,7 +148,10 @@ class Warrior {
         this.keepDistanceRange = 0; // Archers will stand their ground and shoot point-blank instead of running away
         this.attackCooldown = 0;
         this.isDead = false;
-        this.target = null;
+        this.attackers = new Set();
+        this.isSupporting = false;
+        this.supportAngle = 0;
+        this.setTarget(null);
 
         this.animTime = Math.random() * 100;
         this.isAttacking = false;
@@ -1084,8 +1087,23 @@ class Warrior {
         const isMoving = this.lastVelocity && this.lastVelocity.lengthSq() > 0.0001;
         this._lastAnimTime = this.animTime;
 
-        if (this.positionDirty || this.rotationDirty || this.lodDirty || scaleChanged) {
+        if (this.positionDirty || this.rotationDirty || this.lodDirty) {
             this.matrixDirty = true;
+        }
+    }
+
+    updateFormation(baseX, baseZ) {
+        // Implementação vazia ou lógica de formação aqui
+    }
+
+    setTarget(newTarget) {
+        if (this.target === newTarget) return;
+        if (this.target && this.target.attackers) {
+            this.target.attackers.delete(this);
+        }
+        this.target = newTarget;
+        if (this.target && this.target.attackers) {
+            this.target.attackers.add(this);
         }
     }
 
@@ -1181,7 +1199,7 @@ class Warrior {
             this.fleeStartX = this.x;
             this.fleeStartZ = this.z;
             this.isAttacking = false;
-            this.target = null;
+            this.setTarget(null);
         }
 
         if (this.isFleeing) {
@@ -1265,6 +1283,9 @@ class Warrior {
                 this.smoothTurn(this.lastTargetAngle, delta, simSpeed);
                 if (window.PerformanceProfiler) window.PerformanceProfiler.end('steering');
             } else {
+                if (this.isAttacking) {
+                    this.smoothTurn(this.lastTargetAngle, delta, simSpeed * 1.5);
+                }
                 if (!this.isAttacking && this.lodLevel === 0) {
                     
                 }
@@ -1335,7 +1356,7 @@ class Warrior {
         let allOpponentsDead = (opponents.length === 0);
 
         if (allOpponentsDead) {
-            this.target = null;
+            this.setTarget(null);
             this.lastVelocity.set(0, 0, 0);
             this.isTryingToMove = false;
             this.isAttacking = false;
@@ -1401,7 +1422,7 @@ class Warrior {
 
         // Sem alvo válido: ADVANCING ou FLANKING
         if (!this.target || this.target.isDead) {
-            this.target = null;
+            this.setTarget(null);
             this.isAttacking = false;
 
             // Busca novo alvo a cada freq reduzida se estiver avançando/flanqueando
@@ -1459,7 +1480,7 @@ class Warrior {
                 const curDz = getTargetZ(this.target) - this.z;
                 const curDistSq = curDx * curDx + curDz * curDz;
                 if (cDistSq < 36 && curDistSq > 100) { // Inimigo próximo a <6m e alvo atual a >10m
-                    this.target = closeEnemy;
+                    this.setTarget(closeEnemy);
                     this.stateDirty = true;
                     return;
                 }
@@ -1472,7 +1493,23 @@ class Warrior {
 
         const targetRadius = this.target.radius || 0.8;
         const isMeleeCombatant = (this.role === 'melee' || this.isDaggerArcher);
-        const actualAttackRange = isMeleeCombatant ? (this.attackRange - 0.8 + targetRadius) : this.attackRange;
+        
+        let actualAttackRange = isMeleeCombatant ? (this.attackRange - 0.8 + targetRadius) : this.attackRange;
+        
+        this.isSupporting = false;
+        if (isMeleeCombatant && this.target && this.target.attackers) {
+            let rank = 0;
+            let found = false;
+            for (let a of this.target.attackers) {
+                if (a === this) { found = true; break; }
+                if (!a.isDead && (a.role === 'melee' || a.isDaggerArcher)) rank++;
+            }
+            if (found && rank >= 3) {
+                this.isSupporting = true;
+                actualAttackRange = 7.0;
+            }
+        }
+        
         const actualAttackRangeSq = actualAttackRange * actualAttackRange;
 
         // Reprocessamento preventivo ocasional de desvios e rotas
@@ -1577,7 +1614,7 @@ class Warrior {
         if (window.CombatProfiler) window.CombatProfiler.end('qualquer loop sobre inimigos');
 
         if (nearestEnemy) {
-            this.target = nearestEnemy;
+            this.setTarget(nearestEnemy);
             return false; // Continua para o comportamento normal de combate utilizando o novo alvo
         } else {
             // Se não houver perigos próximos, retorna/mantém-se na posição de empurrar
@@ -1592,13 +1629,13 @@ class Warrior {
             const distSq = dx * dx + dz * dz;
             if (window.CombatProfiler) window.CombatProfiler.end('cálculo de distância');
             if (distSq > 0.5) {
-                this.target = null;
+                this.setTarget(null);
                 this.lastVelocity.set(dx, 0, dz).normalize().multiplyScalar(this.speed);
                 this.lastTargetAngle = Math.atan2(dx, dz) + Math.PI;
                 this.isTryingToMove = true;
             } else {
                 this.lastVelocity.set(0, 0, 0);
-                this.target = null;
+                this.setTarget(null);
                 this.isTryingToMove = false;
             }
             resolveLogCollisions(this);
@@ -1662,7 +1699,7 @@ class Warrior {
             }
         } else {
             // Se o alvo morreu ou se não tem alvo, avance na direção inimiga base da facção
-            this.target = null;
+            this.setTarget(null);
             this.isAttacking = false;
             if (this.formationTarget) {
                 this.currentState = 'ADVANCING';
@@ -1792,10 +1829,10 @@ class Warrior {
             if (bestTarget) {
                 if (this.target !== bestTarget) {
                     if (window.CombatProfiler) window.CombatProfiler.start('troca de alvo');
-                    this.target = bestTarget;
+                    this.setTarget(bestTarget);
                     if (window.CombatProfiler) window.CombatProfiler.end('troca de alvo');
                 } else {
-                    this.target = bestTarget;
+                    this.setTarget(bestTarget);
                 }
             }
             if (window.PerformanceProfiler) window.PerformanceProfiler.end('selecao_alvo');
@@ -1859,6 +1896,17 @@ class Warrior {
 
     stopAndAttack(simSpeed) {
         if (window.CombatProfiler) window.CombatProfiler.start('ataque');
+        
+        if (this.isSupporting) {
+            if (this.target) {
+                const tx = this.target.x !== undefined ? this.target.x : (this.target.mesh ? this.target.mesh.position.x : 0);
+                const tz = this.target.z !== undefined ? this.target.z : (this.target.mesh ? this.target.mesh.position.z : 0);
+                this.lastTargetAngle = Math.atan2(tx - this.x, tz - this.z) + Math.PI;
+            }
+            if (window.CombatProfiler) window.CombatProfiler.end('ataque');
+            return;
+        }
+        
         const isShooter = (this.role === 'archer' || isNapoleonicTheme()) && !this.isDaggerArcher;
         if (!isShooter) {
             const isTargetCatapult = (this.target && this.target.isCatapult);
@@ -1944,7 +1992,7 @@ class Warrior {
         this.isAttacking = false;
         this.isTryingToMove = false;
         this.isKiting = false;
-        this.target = null;
+        this.setTarget(null);
         this.lastVelocity.set(0, 0, 0);
 
         playDeathSound();

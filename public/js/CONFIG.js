@@ -519,7 +519,7 @@ window.panelVisible = true;
 let lightningTimer = 0;
 let nextLightningTime = 0;
 let flashCountdown = 0;
-function isNapoleonicTheme() { return false; }
+function isNapoleonicTheme() { return currentTheme === 'napoleonic' || currentTheme === 'napoleonic_3d'; }
 
 // Guarda as coordenadas de todas as árvores ativas para verificar a proximidade de cobertura
 const treePositions = [];

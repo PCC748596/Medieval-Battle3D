@@ -322,6 +322,8 @@ window.findNearestEnemyInGrid = function(warrior) {
 
     let bestTarget = null;
     let bestDistSq = Infinity;
+    let bestOccupiedTarget = null;
+    let bestOccupiedDistSq = Infinity;
 
     // Busca em anéis concêntricos ao redor da unidade
     const maxRing = 20; // Máximo de 20 células de distância (~100 metros) para tropas que recuaram acharem o combate
@@ -352,22 +354,55 @@ window.findNearestEnemyInGrid = function(warrior) {
                     const dz = enemy.z - pz;
                     const distSq = dx * dx + dz * dz;
 
-                    if (distSq < bestDistSq) {
-                        bestDistSq = distSq;
-                        bestTarget = enemy;
-                        foundInRing = true;
+                    const isOccupied = (enemy.attackers && enemy.attackers.size >= 3 && !enemy.attackers.has(warrior));
+                    if (isOccupied) {
+                        if (distSq < bestOccupiedDistSq) {
+                            bestOccupiedDistSq = distSq;
+                            bestOccupiedTarget = enemy;
+                        }
+                    } else {
+                        if (distSq < bestDistSq) {
+                            bestDistSq = distSq;
+                            bestTarget = enemy;
+                            foundInRing = true;
+                        }
                     }
                 }
             }
         }
 
-        // Se encontrou algum inimigo neste anel de proximidade, retorna o melhor imediatamente
-        if (foundInRing) {
-            return bestTarget;
+        // Se encontrou algum inimigo neste anel de proximidade, encerra a busca em anéis
+        if (foundInRing || bestOccupiedTarget) {
+            break;
         }
     }
 
-    return null;
+    // Busca também nas catapultas inimigas (não estão no grid espacial)
+    const catapults = battleManager.getCatapults();
+    for(let i = 0; i < catapults.length; i++) {
+        const cat = catapults[i];
+        if (cat.isDead || cat.faction === warrior.faction) continue;
+        const dx = cat.x - px;
+        const dz = cat.z - pz;
+        const distSq = dx * dx + dz * dz;
+        // Apenas considera se estiver num raio razoável (ex: 100 metros)
+        if (distSq > 10000) continue; 
+        
+        const isOccupied = (cat.attackers && cat.attackers.size >= 3 && !cat.attackers.has(warrior));
+        if (isOccupied) {
+            if (distSq < bestOccupiedDistSq) {
+                bestOccupiedDistSq = distSq;
+                bestOccupiedTarget = cat;
+            }
+        } else {
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                bestTarget = cat;
+            }
+        }
+    }
+
+    return bestTarget || bestOccupiedTarget;
 };
 
 const _catapultHasTargetMap = new Map();
