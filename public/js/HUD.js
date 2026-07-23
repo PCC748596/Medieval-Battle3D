@@ -135,6 +135,12 @@ const HUD = {
             this.elements.panel.style.pointerEvents = 'none';
             if (this.elements.toggleBtn) this.elements.toggleBtn.innerHTML = '🛠️ Ajustes';
         }
+
+        window.panelVisible = isVisible;
+        const perfPanel = document.getElementById('perf-debug-panel');
+        if (perfPanel) {
+            perfPanel.style.display = isVisible ? 'block' : 'none';
+        }
     },
     
     updateSliderValue(sliderId, valStr) {
@@ -218,3 +224,16 @@ const HUD = {
 };
 
 window.HUD = HUD;
+
+// Automatically profile all HUD methods under "hud"
+for (const key in HUD) {
+    if (typeof HUD[key] === 'function') {
+        const original = HUD[key];
+        HUD[key] = function(...args) {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('hud');
+            const res = original.apply(this, args);
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('hud');
+            return res;
+        };
+    }
+}

@@ -1,4 +1,5 @@
 let arrowUidCounter = 0;
+const _currentTargetPosCache = new THREE.Vector3();
 
 // --- CLASSE DOS PROJETEIS DE FLECHA COM TRACER SUBTIL E BRANCO ---
 class Arrow {
@@ -165,7 +166,7 @@ class Arrow {
             this.isDead = true;
 
             if (this.target && !this.target.isDead) {
-                const currentTargetPos = new THREE.Vector3(this.target.x, this.target.y, this.target.z);
+                const currentTargetPos = _currentTargetPosCache.set(this.target.x, this.target.y, this.target.z);
                 currentTargetPos.y += 0.3;
                 const distToTarget = this.mesh.position.distanceTo(currentTargetPos);
                 const hitRadius = (this.target.constructor.name === 'Catapult') ? 4.0 : 1.4;

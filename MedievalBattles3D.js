@@ -299,6 +299,123 @@ function mergeBufferGeometries(geo1, geo2) {
     return mergedGeo;
 }
 
+function mergeGeometries(geos) {
+    let totalVertices = 0;
+    const preparedGeos = geos.map(g => {
+        let geo = g.geometry;
+        if (geo.index) {
+            geo = geo.toNonIndexed();
+        } else {
+            geo = geo.clone();
+        }
+        geo.applyMatrix4(g.matrix);
+        totalVertices += geo.attributes.position.count;
+        return {
+            geo: geo,
+            color: g.color
+        };
+    });
+
+    const positions = new Float32Array(totalVertices * 3);
+    const normals = new Float32Array(totalVertices * 3);
+    const uvs = new Float32Array(totalVertices * 2);
+    const colors = new Float32Array(totalVertices * 3);
+
+    let offset = 0;
+    preparedGeos.forEach(p => {
+        const geo = p.geo;
+        const posAttr = geo.attributes.position;
+        const normAttr = geo.attributes.normal;
+        const uvAttr = geo.attributes.uv;
+
+        const count = posAttr.count;
+
+        positions.set(posAttr.array, offset * 3);
+
+        if (normAttr) {
+            normals.set(normAttr.array, offset * 3);
+        }
+
+        if (uvAttr) {
+            uvs.set(uvAttr.array, offset * 2);
+        }
+
+        const c = p.color || new THREE.Color(0xffffff);
+        for (let i = 0; i < count; i++) {
+            colors[(offset + i) * 3] = c.r;
+            colors[(offset + i) * 3 + 1] = c.g;
+            colors[(offset + i) * 3 + 2] = c.b;
+        }
+
+        offset += count;
+        geo.dispose();
+    });
+
+    const mergedGeo = new THREE.BufferGeometry();
+    mergedGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    mergedGeo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    mergedGeo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    mergedGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    return mergedGeo;
+}
+
+function mergeGroupToMesh(group, faction) {
+    const geos = [];
+    group.updateMatrixWorld(true);
+
+    group.traverse(child => {
+        if (child.isMesh && child.name !== 'lodPrimitive') {
+            const relativeMatrix = new THREE.Matrix4().copy(group.matrixWorld).invert().multiply(child.matrixWorld);
+
+            let color = new THREE.Color(0xffffff);
+            if (child.material) {
+                if (child.material.color) {
+                    color.copy(child.material.color);
+                }
+                if (child.material.map) {
+                    if (child.name === 'shield') {
+                        color.copy(faction === 'knights' ? new THREE.Color(0x1f3c73) : new THREE.Color(0xb32424));
+                    } else if (child.name === 'torso') {
+                        color.copy(faction === 'knights' ? new THREE.Color(0x2c3e50) : new THREE.Color(0x5c7a43));
+                    }
+                }
+            }
+
+            geos.push({
+                geometry: child.geometry,
+                matrix: relativeMatrix,
+                color: color
+            });
+        }
+    });
+
+    if (geos.length === 0) return group;
+
+    const mergedGeometry = mergeGeometries(geos);
+    const mergedMaterial = new THREE.MeshLambertMaterial({
+        vertexColors: true
+    });
+
+    const highDetailMesh = new THREE.Mesh(mergedGeometry, mergedMaterial);
+    highDetailMesh.name = "highDetail";
+    highDetailMesh.castShadow = true;
+    highDetailMesh.receiveShadow = true;
+
+    const container = new THREE.Group();
+    container.name = "mergedWarrior";
+    container.add(highDetailMesh);
+
+    const lodPrimitive = group.getObjectByName('lodPrimitive');
+    if (lodPrimitive) {
+        const clonedLod = lodPrimitive.clone();
+        clonedLod.visible = false;
+        container.add(clonedLod);
+    }
+
+    return container;
+}
+
 // --- ÍNDICE O(1) DO POOL DE PARTÍCULAS ---
 let _particlePoolFreeIndex = 0;
 
@@ -3063,6 +3180,11 @@ class Warrior {
 
                 templateMeshes[this.faction][this.role] = template;
             }
+
+            if (currentTheme !== 'napoleonic_3d') {
+                const rawTemplate = templateMeshes[this.faction][this.role];
+                templateMeshes[this.faction][this.role] = mergeGroupToMesh(rawTemplate, this.faction);
+            }
         }
 
         this.mesh = templateMeshes[this.faction][this.role].clone();
@@ -3081,6 +3203,7 @@ class Warrior {
         }
 
         this.lodPrimitive = this.mesh.getObjectByName("lodPrimitive");
+        this.highDetail = this.mesh.getObjectByName("highDetail");
         this.torso = this.mesh.getObjectByName("torso");
         this.head = this.mesh.getObjectByName("head");
         this.armL = this.mesh.getObjectByName("armL");
@@ -3254,6 +3377,7 @@ class Warrior {
 
         if (lodEnabled && radius > 250) {
             if (this.lodPrimitive && !this.lodPrimitive.visible) this.lodPrimitive.visible = true;
+            if (this.highDetail && this.highDetail.visible) this.highDetail.visible = false;
             if (this.head && this.head.visible) this.head.visible = false;
             if (this.torso && this.torso.visible) this.torso.visible = false;
             if (this.armL && this.armL.visible) this.armL.visible = false;
@@ -3268,6 +3392,7 @@ class Warrior {
             this.lodLevel = 2;
         } else if (lodEnabled && distSq > medDistSq) {
             if (this.lodPrimitive && this.lodPrimitive.visible) this.lodPrimitive.visible = false;
+            if (this.highDetail && !this.highDetail.visible) this.highDetail.visible = true;
             if (this.head && !this.head.visible) this.head.visible = true;
             if (this.torso && !this.torso.visible) this.torso.visible = true;
             if (this.weapon && !this.weapon.visible) this.weapon.visible = true;
@@ -3282,6 +3407,7 @@ class Warrior {
             this.lodLevel = 1;
         } else {
             if (this.lodPrimitive && this.lodPrimitive.visible) this.lodPrimitive.visible = false;
+            if (this.highDetail && !this.highDetail.visible) this.highDetail.visible = true;
             if (this.head && !this.head.visible) this.head.visible = true;
             if (this.torso && !this.torso.visible) this.torso.visible = true;
             if (this.weapon && !this.weapon.visible) this.weapon.visible = true;
@@ -3753,15 +3879,27 @@ class Warrior {
             const swing = Math.sin(this.attackAnimProgress * Math.PI);
 
             if (this.lodLevel === 0) {
-                this.armR.rotation.x = Math.PI / 6 + swing * 1.5;
-                this.armR.position.z = -swing * 0.4;
+                if (this.armR) {
+                    this.armR.rotation.x = Math.PI / 6 + swing * 1.5;
+                    this.armR.position.z = -swing * 0.4;
+                }
+                if (this.highDetail) {
+                    this.highDetail.position.z = -swing * 0.5;
+                    this.highDetail.rotation.x = -swing * 0.2;
+                }
             }
 
             if (this.attackAnimProgress >= 1.0) {
                 this.isAttacking = false;
                 if (this.lodLevel === 0) {
-                    this.armR.rotation.x = 0;
-                    this.armR.position.z = 0;
+                    if (this.armR) {
+                        this.armR.rotation.x = 0;
+                        this.armR.position.z = 0;
+                    }
+                    if (this.highDetail) {
+                        this.highDetail.position.z = 0;
+                        this.highDetail.rotation.x = 0;
+                    }
                 }
                 this.attackCooldown = 0.8 + Math.random() * 0.5;
 
@@ -3786,12 +3924,16 @@ class Warrior {
                     this.napoleonicGltf.position.y = 0;
                 } else if (isNapoleonicTheme()) {
                     // Braço esquerdo apoia o mosquete à frente (esticado/dobrado para dentro)
-                    this.armL.rotation.set(-1.2, 0.6, 0);
-                    this.armL.position.set(-0.5, 1.275, 0.2);
+                    if (this.armL) {
+                        this.armL.rotation.set(-1.2, 0.6, 0);
+                        this.armL.position.set(-0.5, 1.275, 0.2);
+                    }
 
                     // Braço direito segura o gatilho na altura do ombro/rosto
-                    this.armR.rotation.set(-1.4, -0.4, 0);
-                    this.armR.position.set(0.5, 1.275, 0.2);
+                    if (this.armR) {
+                        this.armR.rotation.set(-1.4, -0.4, 0);
+                        this.armR.position.set(0.5, 1.275, 0.2);
+                    }
 
                     if (this.bowGroup) {
                         // Compensa a rotação do braço para apontar a arma reto (+Z)
@@ -3799,14 +3941,23 @@ class Warrior {
                         this.bowGroup.position.set(0.2, -0.9, -0.3);
                     }
                 } else {
-                    this.armL.rotation.x = -Math.PI / 2;
-                    this.armL.rotation.y = -Math.PI / 6;
-                    this.armR.rotation.x = -Math.PI / 2.5;
-                    this.armR.position.z = swing * 0.45;
+                    if (this.armL) {
+                        this.armL.rotation.x = -Math.PI / 2;
+                        this.armL.rotation.y = -Math.PI / 6;
+                    }
+                    if (this.armR) {
+                        this.armR.rotation.x = -Math.PI / 2.5;
+                        this.armR.position.z = swing * 0.45;
+                    }
 
                     if (this.bowString) {
                         this.bowString.scale.z = 1.0 + swing * 3.5;
                     }
+                }
+
+                if (this.highDetail) {
+                    this.highDetail.rotation.x = -0.15 - swing * 0.1;
+                    this.highDetail.position.z = swing * 0.15;
                 }
             }
 
@@ -3819,24 +3970,37 @@ class Warrior {
                         this.napoleonicGltf.position.y = 0;
                     } else if (isNapoleonicTheme()) {
                         // Braço esquerdo relaxado
-                        this.armL.rotation.set(0, 0, Math.PI / 12);
-                        this.armL.position.set(-0.85, 1.275, 0);
+                        if (this.armL) {
+                            this.armL.rotation.set(0, 0, Math.PI / 12);
+                            this.armL.position.set(-0.85, 1.275, 0);
+                        }
                         // Braço direito gira pra frente, mão segura a coronha por baixo
-                        this.armR.rotation.set(-0.26, 0, -0.05);
-                        this.armR.position.set(0.85, 1.275, 0);
+                        if (this.armR) {
+                            this.armR.rotation.set(-0.26, 0, -0.05);
+                            this.armR.position.set(0.85, 1.275, 0);
+                        }
                         if (this.bowGroup) {
                             this.bowGroup.rotation.set(-1.2, 0, 0);
                             this.bowGroup.position.set(0, -0.3, -0.2);
                         }
                     } else {
-                        this.armL.rotation.x = 0;
-                        this.armL.rotation.y = 0;
-                        this.armR.rotation.x = 0;
-                        this.armR.position.z = 0;
+                        if (this.armL) {
+                            this.armL.rotation.x = 0;
+                            this.armL.rotation.y = 0;
+                        }
+                        if (this.armR) {
+                            this.armR.rotation.x = 0;
+                            this.armR.position.z = 0;
+                        }
 
                         if (this.bowString) {
                             this.bowString.scale.z = 1.0;
                         }
+                    }
+
+                    if (this.highDetail) {
+                        this.highDetail.rotation.x = 0;
+                        this.highDetail.position.z = 0;
                     }
                 }
 
@@ -3939,6 +4103,17 @@ class Warrior {
             return;
         }
 
+        if (this.highDetail) {
+            // Merged warrior animation: sway side-to-side, lean forward, and vertical bobbing
+            const sway = Math.sin(this.animTime) * 0.08;
+            const lean = -0.12;
+            const bob = Math.abs(Math.sin(this.animTime * 2)) * 0.15;
+            this.highDetail.rotation.z = sway;
+            this.highDetail.rotation.x = lean;
+            this.highDetail.position.y = bob;
+            return;
+        }
+
         const modifier = reverse ? -1 : 1;
         const swing = Math.sin(this.animTime) * 0.7 * modifier;
         this.legL.rotation.x = swing;
@@ -3974,6 +4149,15 @@ class Warrior {
             this.napoleonicGltf.rotation.z = breathe;
             this.napoleonicGltf.rotation.x = 0;
             this.napoleonicGltf.position.y = 0;
+            return;
+        }
+
+        if (this.highDetail) {
+            // Smooth vertical idle breathing animation
+            const breathe = Math.sin(this.animTime * 0.3) * 0.03;
+            this.highDetail.position.y = breathe;
+            this.highDetail.rotation.z = 0;
+            this.highDetail.rotation.x = 0;
             return;
         }
 
@@ -4958,7 +5142,7 @@ function renderWarriorsInstanced() {
                     im.instanceColor.setUsage(THREE.DynamicDrawUsage);
                 }
 
-                if (isFlashed && (child.name === 'head' || child.name === 'torso' || child.name === 'armL' || child.name === 'armR' || child.name === 'legL' || child.name === 'legR')) {
+                if (isFlashed && (child.name === 'highDetail' || child.name === 'head' || child.name === 'torso' || child.name === 'armL' || child.name === 'armR' || child.name === 'legL' || child.name === 'legR')) {
                     _tmpColorIM.setHex(0xffaaaa);
                 } else if (w.baseColor) {
                     _tmpColorIM.copy(w.baseColor);

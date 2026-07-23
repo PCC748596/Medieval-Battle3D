@@ -19,13 +19,18 @@ function createAudioPool(src, size, baseVol = 0.3) {
     let idx = 0;
     return {
         play: (volMultiplier = 1.0) => {
-            if (!soundEnabled) return;
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('sons');
+            if (!soundEnabled) {
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('sons');
+                return;
+            }
             const audio = pool[idx];
             audio.volume = baseVol * volMultiplier;
             audio.currentTime = 0;
             // Ignore autoplay errors quietly to not pollute tests
             audio.play().catch(e => {  });
             idx = (idx + 1) % size;
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('sons');
         }
     };
 }
@@ -77,9 +82,14 @@ window.playDeathSound = function () {
 };
 
 window.playWarCrySound = function () {
-    if (!soundEnabled) return;
+    if (window.PerformanceProfiler) window.PerformanceProfiler.start('sons');
+    if (!soundEnabled) {
+        if (window.PerformanceProfiler) window.PerformanceProfiler.end('sons');
+        return;
+    }
     warCryMusic.currentTime = 0;
     warCryMusic.play().catch(e => {  });
+    if (window.PerformanceProfiler) window.PerformanceProfiler.end('sons');
 };
 
 window.startContinuousCrowdRoar = function () {};

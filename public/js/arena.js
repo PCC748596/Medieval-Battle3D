@@ -70,7 +70,7 @@ function buildArena() {
 
     // Geração de lagos (mais lagos, menores, nas partes baixas)
     lakes.length = 0;
-    const numLakes = 8 + Math.floor(Math.random() * 8);
+    const numLakes = 0; // 8 + Math.floor(Math.random() * 8);
     for (let i = 0; i < numLakes; i++) {
         let lx, lz, attempts = 0;
         do {
@@ -88,7 +88,7 @@ function buildArena() {
 
     // Geração de lama (mais lamas, menores)
     muds.length = 0;
-    const numMuds = 10 + Math.floor(Math.random() * 9);
+    const numMuds = 0; // 10 + Math.floor(Math.random() * 9);
     for (let i = 0; i < numMuds; i++) {
         muds.push({
             x: (Math.random() - 0.5) * 800,

@@ -13,6 +13,7 @@ class Catapult {
 
     constructor(faction, x, z) {
         this.faction = faction;
+        this.isCatapult = true;
         this.hp = 500;
         this.maxHp = 500;
         this.isDead = false;
@@ -39,7 +40,7 @@ class Catapult {
         this.mesh.position.set(x, terrainY + 0.64, z);
 
         // Roda catapulta para encarar o centro da batalha
-        this.mesh.rotation.y = armies[faction].catapultRotationY;
+        this.mesh.rotation.y = window.armies[faction].catapultRotationY;
         this.mesh.traverse(child => {
             if (child.isMesh) {
                 child.castShadow = true;
@@ -277,7 +278,7 @@ class Catapult {
                 this.fireCooldown = this.fireRate;
             }
         } else {
-            const targetRotation = armies[this.faction].catapultRotationY;
+            const targetRotation = window.armies[this.faction].catapultRotationY;
             let diff = targetRotation - this.mesh.rotation.y;
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
@@ -303,7 +304,7 @@ class Catapult {
 
             const speed = 4.0 * terrainSpeed;
             const moveDist = speed * delta * simSpeed;
-            const dir = armies[this.faction].catapultDir;
+            const dir = window.armies[this.faction].catapultDir;
             this.mesh.position.x += dir * moveDist;
             this.mesh.position.y = getTerrainHeight(this.mesh.position.x, this.mesh.position.z) + 0.64;
 
@@ -505,6 +506,6 @@ class Catapult {
         this.isDead = true;
         scene.remove(this.mesh);
         createSparks(this.mesh.position, false);
-        armies[this.faction].addDeadCount();
+        window.armies[this.faction].addDeadCount();
     }
 }

@@ -5,7 +5,7 @@
   "type": "module",
   "main": "main.cjs",
   "scripts": {
-    "dev": "concurrently \"vite --port=3030 --host=0.0.0.0 --strictPort\" \"wait-on http://localhost:3030 && electron .\"",
+    "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
@@ -19,6 +19,7 @@
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "puppeteer": "^25.3.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "vite": "^6.2.3"

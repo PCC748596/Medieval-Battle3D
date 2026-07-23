@@ -18,7 +18,7 @@ function spawnBattlefieldObstacles() {
 function spawnCatapults() {
     const spawnFactionCatapults = (faction, groups) => {
         const num = Math.min(CONFIG.CATAPULT_MAX, Math.max(1, groups.length));
-        const dir = armies[faction].dirX;
+        const dir = window.armies[faction].dirX;
         
         for (let i = 0; i < num; i++) {
             const groupIndex = Math.floor(i * groups.length / num);
@@ -35,7 +35,7 @@ function spawnCatapults() {
             const p2 = new Warrior(faction, 'melee', catX + dir * xOff, zOff + CONFIG.CATAPULT_PUSHER_Z_OFFSET, true, cat);
             if (isNapoleonicTheme()) p1.hasTorch = true;
             cat.pushers = [p1, p2];
-            armies[faction].list.push(p1, p2);
+            window.armies[faction].list.push(p1, p2);
         }
     };
     
@@ -137,9 +137,9 @@ function updateRain(dt) {
         // 2. Utilizar distância da câmera e atualizar apenas gotas próximas
         if (distSq > maxDistSq) {
             // Reaproveita gota reposicionando-a perto da câmera
-            rainPositions[i * 3] = camX + camDir.x * maxDist * 0.5 + (Math.random() - 0.5) * maxDist * 1.2;
-            rainPositions[i * 3 + 2] = camZ + camDir.z * maxDist * 0.5 + (Math.random() - 0.5) * maxDist * 1.2;
-            rainPositions[i * 3 + 1] = CONFIG.RAIN_START_Y + Math.random() * CONFIG.RAIN_VAR_Y;
+            rainPositions[i * 3] = camX + camDir.x * maxDist * 0.5 + (fastRandom() - 0.5) * maxDist * 1.2;
+            rainPositions[i * 3 + 2] = camZ + camDir.z * maxDist * 0.5 + (fastRandom() - 0.5) * maxDist * 1.2;
+            rainPositions[i * 3 + 1] = CONFIG.RAIN_START_Y + fastRandom() * CONFIG.RAIN_VAR_Y;
             continue; // Pula matrix update neste frame (economiza CPU)
         }
 
@@ -148,9 +148,9 @@ function updateRain(dt) {
         py -= rainVelocities[i] * dt * simSpeed;
         
         if (py < 0) {
-            py = CONFIG.RAIN_START_Y + Math.random() * CONFIG.RAIN_VAR_Y;
-            rainPositions[i * 3] = camX + (Math.random() - 0.5) * maxDist * 1.2;
-            rainPositions[i * 3 + 2] = camZ + (Math.random() - 0.5) * maxDist * 1.2;
+            py = CONFIG.RAIN_START_Y + fastRandom() * CONFIG.RAIN_VAR_Y;
+            rainPositions[i * 3] = camX + (fastRandom() - 0.5) * maxDist * 1.2;
+            rainPositions[i * 3 + 2] = camZ + (fastRandom() - 0.5) * maxDist * 1.2;
         }
         rainPositions[i * 3 + 1] = py;
 
@@ -359,6 +359,9 @@ function resetBattle() {
     clearParticles();
     clearObstacles();
     
+    // Reset stats
+    window.blockStats = { waiting: 0, flanking: 0, avoidedCalcs: 0 };
+    
     spawnArmies();
     spawnCatapults();
     
@@ -405,6 +408,11 @@ function changeBattlefieldSize(val) {
     sizeX = Math.round(val * CONFIG.ARENA_ASPECT_RATIO);
     sizeZ = val;
 
+    // Reconstrói o cache de relevo do terreno com o novo tamanho de battlefield
+    if (typeof initTerrainHeightCache === 'function') {
+        initTerrainHeightCache();
+    }
+
     // Ajusta a densidade do fog de acordo com o tamanho para manter a visibilidade proporcional do campo todo
     if (scene.fog) {
         scene.fog.density = CONFIG.FOG_DENSITY_MULTIPLIER / sizeX;
@@ -422,6 +430,18 @@ window.setTheme = function (theme) {
     templateMeshes.knights.archer = null;
     templateMeshes.goblins.melee = null;
     templateMeshes.goblins.archer = null;
+
+    // Clear animated geometries so they are re-cached with the new theme templates
+    window.animatedGeometries = {
+        knights: {
+            melee: { idle: null, walk: [], attack: [] },
+            archer: { idle: null, walk: [], attack: [] }
+        },
+        goblins: {
+            melee: { idle: null, walk: [], attack: [] },
+            archer: { idle: null, walk: [], attack: [] }
+        }
+    };
 
     // Regenerate shield textures and update materials
     if (textures.knights.shield) textures.knights.shield.dispose();
@@ -568,7 +588,7 @@ function spawnFormation(faction, role, count, startX, dir, startXOffset, zBase, 
         const z = zBase + (col - (colsPerBlock - 1) / 2) * spacingZ;
         
         const w = new Warrior(faction, role, x, z);
-        armies[faction].list.push(w);
+        window.armies[faction].list.push(w);
     }
     return depth;
 }
@@ -582,7 +602,7 @@ function spawnArchers(faction, count, startX, dir, zBase, archerStartXOffset, co
 }
 
 function registerGroups(faction, groups) {
-    armies[faction].groups = groups;
+    window.armies[faction].groups = groups;
 }
 
 function updateArmyCounters() {
@@ -596,7 +616,7 @@ function spawnUnits(faction, quantity) {
     const spacingX = CONFIG.UNITS_SPACING_X;
     const spacingZ = CONFIG.UNITS_SPACING_Z;
 
-    const dir = armies[faction].dirX;
+    const dir = window.armies[faction].dirX;
     const startX = dir * (sizeX * CONFIG.BATTLEFIELD_START_X_RATIO);
 
     const { G, groupSpacingZ } = createGroups(numMelee, sizeZ, CONFIG.BATTLEFIELD_MAX_Z_RATIO, CONFIG.UNITS_BASE_GROUP_SPACING);

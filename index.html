@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="pt-PT">
 
-<head>
+<head><script>window.addEventListener("error", function(e) { const div = document.createElement("div"); div.style.position="absolute"; div.style.top="0"; div.style.left="0"; div.style.backgroundColor="red"; div.style.color="white"; div.style.zIndex="999999"; div.innerHTML = "ERROR: " + e.message + " in " + e.filename + ":" + e.lineno; (document.body || document.documentElement).appendChild(div); });</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Simulador de Batalha Medieval 3D - Guerreiros & Arqueiros</title>
     <!-- Tailwind CSS para um painel de controlo moderno -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/src/index.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <!-- CSS Externo -->
@@ -287,6 +287,7 @@
     </div>
 
     <script src="js/CONFIG.js"></script>
+    <script src="js/combat-profiler.js"></script>
     <script src="js/BattleManager.js"></script>
     <script src="js/HUD.js"></script>
     <script src="js/scene.js"></script>
@@ -306,7 +307,7 @@
     <script src="js/particles.js"></script>
     <script src="js/battle.js"></script>
     <script src="js/game-loop.js"></script>
-    <script src="js/main.js"></script>
+    <script src="js/error-logger.js"></script><script src="js/main.js"></script>
 </body>
 
 </html>

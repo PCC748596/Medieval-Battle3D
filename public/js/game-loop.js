@@ -26,10 +26,12 @@ const imAllocator = {
     updateMatrices: function () {
         for (let i = 0; i < this.meshes.length; i++) {
             if (this.meshes[i].count > 0) {
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('needs_update');
                 this.meshes[i].instanceMatrix.needsUpdate = true;
                 if (this.meshes[i].instanceColor) {
                     this.meshes[i].instanceColor.needsUpdate = true;
                 }
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('needs_update');
             }
         }
     }
@@ -41,18 +43,50 @@ const _projScreenMatrix = new THREE.Matrix4();
 const _sphere = new THREE.Sphere();
 
 function renderList(list) {
+    if (!window.RenderOptimizationStats) {
+        window.RenderOptimizationStats = {
+            setMatrixAtSaved: 0,
+            setMatrixAtTotal: 0,
+            colorUpdatesSaved: 0,
+            colorUpdatesTotal: 0,
+            visibilityChecksSaved: 0,
+            visibilityChecksTotal: 0
+        };
+    }
+
     const len = list.length;
     for (let i = 0; i < len; i++) {
         const w = list[i];
         const isWarrior = (w.constructor.name === 'Warrior');
         
-        let mesh = isWarrior ? null : w.mesh;
+        let mesh = isWarrior ? w.dummy : w.mesh;
         let pos = isWarrior ? w : w.mesh.position;
-        let visible = isWarrior ? w.visible : w.mesh.visible;
+        
+        if (window.PerformanceProfiler) window.PerformanceProfiler.start('visibilidade');
+        
+        if (window.RenderOptimizationStats) window.RenderOptimizationStats.visibilityChecksTotal++;
+        let visible;
+        if (isWarrior) {
+            w.updateDirtyFlags();
+            if (w.visibilityDirty || w._cachedVisible === undefined) {
+                w._cachedVisible = w.visible;
+                w.visibilityDirty = false;
+            } else {
+                if (window.RenderOptimizationStats) window.RenderOptimizationStats.visibilityChecksSaved++;
+            }
+            visible = w._cachedVisible;
+        } else {
+            visible = w.mesh.visible;
+        }
+        
+        if (window.PerformanceProfiler) window.PerformanceProfiler.end('visibilidade');
 
         if (!visible) {
-            if (w.lodLevel !== undefined && w.lodLevel > 1) continue;
-            if (w.lodLevel === undefined) continue;
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('lod_render');
+            const lodLvl = w.lodLevel;
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('lod_render');
+            if (lodLvl !== undefined && lodLvl > 1) continue;
+            if (lodLvl === undefined) continue;
         }
 
         // CPU Frustum Culling
@@ -62,16 +96,133 @@ function renderList(list) {
         }
 
         if (isWarrior) {
-            mesh = templateMeshes[w.faction][w.role];
             if (!mesh) continue;
-            mesh.position.set(w.x, w.y, w.z);
-            mesh.rotation.set(w.rotX || 0, w.rotY || 0, w.rotZ || 0);
-            mesh.scale.set(w.scale || 1, w.scale || 1, w.scale || 1);
-            if (w.applyPoseToDummy) w.applyPoseToDummy(mesh);
+            const useMergedOptimization = isWarrior && currentTheme !== 'napoleonic_3d' && w.lodLevel === 0 && !w.isPusher;
+            
+            if (w.matrixDirty) {
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
+                mesh.position.set(w.x, w.y, w.z);
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
+                
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
+                mesh.rotation.set(w.rotX || 0, w.rotY || 0, w.rotZ || 0);
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                
+                mesh.scale.set(w.scale || 1, w.scale || 1, w.scale || 1);
+                
+                if (!useMergedOptimization) {
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('animacoes_visuais');
+                    w.applyPoseToDummy(mesh);
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('animacoes_visuais');
+                }
+                
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('update_matrix');
+                mesh.updateMatrixWorld(true);
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('update_matrix');
+                
+                w.matrixDirty = false;
+                w.positionDirty = false;
+                w.rotationDirty = false;
+                w.lodDirty = false;
+            }
+        } else {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('update_matrix');
+            mesh.updateMatrixWorld(true);
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('update_matrix');
         }
-
-        mesh.updateMatrixWorld(true);
+        
         const isFlashed = w.flashTimer > 0;
+        const useMergedOptimization = isWarrior && currentTheme !== 'napoleonic_3d' && w.lodLevel === 0 && !w.isPusher;
+
+        if (useMergedOptimization) {
+            let geom = null;
+            const faction = w.faction;
+            const role = w.role;
+            const anims = window.animatedGeometries && window.animatedGeometries[faction] && window.animatedGeometries[faction][role];
+
+            if (anims) {
+                if (w.isDead) {
+                    geom = anims.idle;
+                } else if (w.isAttacking) {
+                    const frame = Math.floor(w.attackAnimProgress * 6) % 6;
+                    geom = anims.attack[frame] || anims.idle;
+                } else if (w.isTryingToMove || (w.lastVelocity && w.lastVelocity.lengthSq() > 0.0001)) {
+                    const frame = Math.floor(((w.animTime || 0) % (2 * Math.PI)) / (2 * Math.PI) * 8) % 8;
+                    geom = anims.walk[frame] || anims.idle;
+                } else {
+                    geom = anims.idle;
+                }
+            }
+
+            if (geom) {
+                const mat = window.sharedMergedMaterial;
+                const im = imAllocator.getIM(geom, mat);
+                const idx = im.count;
+                if (idx < im.instanceMatrix.count) {
+                    if (window.RenderOptimizationStats) window.RenderOptimizationStats.setMatrixAtTotal++;
+                    
+                    let matrixMatch = false;
+                    const array = im.instanceMatrix.array;
+                    const offset = idx * 16;
+                    const elements = w.dummy.matrixWorld.elements;
+                    
+                    if (!w.matrixDirty) {
+                        matrixMatch = true;
+                        for (let j = 0; j < 16; j++) {
+                            if (array[offset + j] !== elements[j]) {
+                                matrixMatch = false;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (matrixMatch) {
+                        if (window.RenderOptimizationStats) window.RenderOptimizationStats.setMatrixAtSaved++;
+                    } else {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('set_matrix_at');
+                        im.setMatrixAt(idx, w.dummy.matrixWorld);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('set_matrix_at');
+                    }
+
+                    if (!im.instanceColor) {
+                        const colors = new Float32Array(im.instanceMatrix.count * 3);
+                        colors.fill(1.0);
+                        im.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+                        im.instanceColor.setUsage(THREE.DynamicDrawUsage);
+                    }
+
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('cores');
+                    if (isFlashed) {
+                        _tmpColorIM.setHex(0xffaaaa);
+                    } else if (w.baseColor) {
+                        _tmpColorIM.copy(w.baseColor);
+                    } else {
+                        _tmpColorIM.setHex(0xffffff);
+                    }
+                    
+                    let colorMatch = false;
+                    const colorOffset = idx * 3;
+                    const r = im.instanceColor.array[colorOffset];
+                    const g = im.instanceColor.array[colorOffset + 1];
+                    const b = im.instanceColor.array[colorOffset + 2];
+                    if (r === _tmpColorIM.r && g === _tmpColorIM.g && b === _tmpColorIM.b) {
+                        colorMatch = true;
+                    }
+                    
+                    if (window.RenderOptimizationStats) window.RenderOptimizationStats.colorUpdatesTotal++;
+                    if (colorMatch) {
+                        if (window.RenderOptimizationStats) window.RenderOptimizationStats.colorUpdatesSaved++;
+                    } else {
+                        im.instanceColor.setXYZ(idx, _tmpColorIM.r, _tmpColorIM.g, _tmpColorIM.b);
+                        im.instanceColor.needsUpdate = true;
+                    }
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('cores');
+
+                    im.count++;
+                }
+                continue;
+            }
+        }
 
         let subMeshes = isWarrior ? mesh.subMeshes : w.subMeshes;
         if (!subMeshes) {
@@ -83,16 +234,97 @@ function renderList(list) {
             else w.subMeshes = subMeshes;
         }
 
-        const subLen = subMeshes.length;
-        for (let m = 0; m < subLen; m++) {
-            const child = subMeshes[m];
-            if (!child.visible) continue;
-            
-            const im = imAllocator.getIM(child.geometry, child.material);
-            const idx = im.count;
-            if (idx >= im.instanceMatrix.count) continue;
+        let subMeshesToRender = [];
+        if (isWarrior) {
+            if (!w.visibleSubMeshes || w.lodDirty || w.visibilityDirty) {
+                w.visibleSubMeshes = [];
+                const subLen = subMeshes.length;
+                for (let m = 0; m < subLen; m++) {
+                    const child = subMeshes[m];
+                    if (child.visible) {
+                        w.visibleSubMeshes.push(child);
+                    }
+                    if (window.RenderOptimizationStats) window.RenderOptimizationStats.visibilityChecksTotal++;
+                }
+            } else {
+                if (window.RenderOptimizationStats) {
+                    window.RenderOptimizationStats.visibilityChecksTotal += subMeshes.length;
+                    window.RenderOptimizationStats.visibilityChecksSaved += subMeshes.length;
+                }
+            }
+            subMeshesToRender = w.visibleSubMeshes;
+        } else {
+            const subLen = subMeshes.length;
+            for (let m = 0; m < subLen; m++) {
+                if (subMeshes[m].visible) {
+                    subMeshesToRender.push(subMeshes[m]);
+                }
+            }
+        }
 
-            im.setMatrixAt(idx, child.matrixWorld);
+        const subLen = subMeshesToRender.length;
+        for (let m = 0; m < subLen; m++) {
+            const child = subMeshesToRender[m];
+            
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('geometrias');
+            const geom = child.geometry;
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('geometrias');
+            
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('materiais');
+            const mat = child.material;
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('materiais');
+
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('sombras');
+            const cast = child.castShadow;
+            const rec = child.receiveShadow;
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('sombras');
+
+            let partKey = null;
+            if (child.name === 'armL' || child.name === 'armR') {
+                partKey = 'bracos';
+            } else if (child.name === 'legL' || child.name === 'legR') {
+                partKey = 'pernas';
+            } else if (child.name === 'shield') {
+                partKey = 'escudos';
+            } else if (child.name === 'swordGroup' || child.name === 'blade' || child.name === 'guard') {
+                partKey = 'espadas';
+            } else if (child.name === 'torchGroup' || child.name === 'torch' || (child.name && child.name.includes('torch'))) {
+                partKey = 'tochas';
+            }
+            
+            if (partKey && window.PerformanceProfiler) window.PerformanceProfiler.start(partKey);
+            const im = imAllocator.getIM(geom, mat);
+            const idx = im.count;
+            if (idx >= im.instanceMatrix.count) {
+                if (partKey && window.PerformanceProfiler) window.PerformanceProfiler.end(partKey);
+                continue;
+            }
+
+            if (window.RenderOptimizationStats) window.RenderOptimizationStats.setMatrixAtTotal++;
+            
+            let matrixMatch = false;
+            const array = im.instanceMatrix.array;
+            const offset = idx * 16;
+            const elements = child.matrixWorld.elements;
+            
+            // Check if matrix is already correct in the buffer at this index
+            if (isWarrior && !w.matrixDirty) {
+                matrixMatch = true;
+                for (let j = 0; j < 16; j++) {
+                    if (array[offset + j] !== elements[j]) {
+                        matrixMatch = false;
+                        break;
+                    }
+                }
+            }
+            
+            if (matrixMatch) {
+                if (window.RenderOptimizationStats) window.RenderOptimizationStats.setMatrixAtSaved++;
+            } else {
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('set_matrix_at');
+                im.setMatrixAt(idx, child.matrixWorld);
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('set_matrix_at');
+            }
 
             if (!im.instanceColor) {
                 const colors = new Float32Array(im.instanceMatrix.count * 3);
@@ -101,15 +333,38 @@ function renderList(list) {
                 im.instanceColor.setUsage(THREE.DynamicDrawUsage);
             }
 
-            if (isFlashed && (child.name === 'head' || child.name === 'torso' || child.name === 'armL' || child.name === 'armR' || child.name === 'legL' || child.name === 'legR')) {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('cores');
+            if (isFlashed && (child.name === 'highDetail' || child.name === 'head' || child.name === 'torso' || child.name === 'armL' || child.name === 'armR' || child.name === 'legL' || child.name === 'legR')) {
                 _tmpColorIM.setHex(0xffaaaa);
             } else if (w.baseColor) {
                 _tmpColorIM.copy(w.baseColor);
             } else {
                 _tmpColorIM.setHex(0xffffff);
             }
-            im.setColorAt(idx, _tmpColorIM);
+            
+            let colorMatch = false;
+            const colorOffset = idx * 3;
+            const r = im.instanceColor.array[colorOffset];
+            const g = im.instanceColor.array[colorOffset + 1];
+            const b = im.instanceColor.array[colorOffset + 2];
+            if (r === _tmpColorIM.r && g === _tmpColorIM.g && b === _tmpColorIM.b) {
+                colorMatch = true;
+            }
+            
+            if (window.RenderOptimizationStats) window.RenderOptimizationStats.colorUpdatesTotal++;
+            if (colorMatch) {
+                if (window.RenderOptimizationStats) window.RenderOptimizationStats.colorUpdatesSaved++;
+            } else {
+                im.setColorAt(idx, _tmpColorIM);
+            }
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('cores');
+            
             im.count++;
+            if (partKey && window.PerformanceProfiler) window.PerformanceProfiler.end(partKey);
+        }
+        
+        if (isWarrior) {
+            w.colorDirty = false;
         }
     }
 }
@@ -167,7 +422,7 @@ function renderParticles() {
                 im.instanceColor.setUsage(THREE.DynamicDrawUsage);
             }
 
-            if (isFlashed && (child.name === 'head' || child.name === 'torso' || child.name === 'armL' || child.name === 'armR' || child.name === 'legL' || child.name === 'legR')) {
+            if (isFlashed && (child.name === 'highDetail' || child.name === 'head' || child.name === 'torso' || child.name === 'armL' || child.name === 'armR' || child.name === 'legL' || child.name === 'legR')) {
                 _tmpColorIM.setHex(0xffaaaa);
             } else if (w.baseColor) {
                 _tmpColorIM.copy(w.baseColor);
@@ -185,19 +440,38 @@ function renderWarriorsInstanced() {
     _projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     _frustum.setFromProjectionMatrix(_projScreenMatrix);
 
+    if (window.PerformanceProfiler) window.PerformanceProfiler.start('render_unidades');
     imAllocator.resetCounts();
 
     renderList(battleManager.getKnights());
     renderList(battleManager.getGoblins());
     renderList(battleManager.getDeadWarriors());
+    if (window.PerformanceProfiler) {
+        window.PerformanceProfiler.end('render_unidades');
+        window.PerformanceProfiler.start('flechas');
+    }
     renderList(battleManager.getArrows());
+    if (window.PerformanceProfiler) {
+        window.PerformanceProfiler.end('flechas');
+        window.PerformanceProfiler.start('particulas');
+    }
     renderParticles();
+    if (window.PerformanceProfiler) {
+        window.PerformanceProfiler.end('particulas');
+        window.PerformanceProfiler.start('catapultas');
+    }
     renderList(battleManager.getCatapults());
 
+    if (window.PerformanceProfiler) {
+        window.PerformanceProfiler.end('catapultas');
+        window.PerformanceProfiler.start('matrizes_instancedmesh');
+    }
     imAllocator.updateMatrices();
+    if (window.PerformanceProfiler) window.PerformanceProfiler.end('matrizes_instancedmesh');
 }
 
 function animate() {
+    if (window.PerformanceProfiler) window.PerformanceProfiler.startFrame();
     requestAnimationFrame(animate);
 
     const now = performance.now();
@@ -259,40 +533,65 @@ function animate() {
         const medDistSq = medDist * medDist;
         const maxDistSq = maxDist * maxDist;
 
+        if (window.CombatProfiler) window.CombatProfiler.startFrame();
+
         if (window.populateSpatialGrid) {
+            if (window.CombatProfiler) window.CombatProfiler.start('atualização da Spatial Grid');
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('spatial_grid');
             window.populateSpatialGrid();
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('spatial_grid');
+            if (window.CombatProfiler) window.CombatProfiler.end('atualização da Spatial Grid');
         }
 
         for (let i = knights.length - 1; i >= 0; i--) {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('lod');
             knights[i].updateLOD(cameraPos, maxDistSq, medDistSq);
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('lod');
             knights[i].update(goblins, dt, simulationSpeed);
         }
 
         for (let i = goblins.length - 1; i >= 0; i--) {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('lod');
             goblins[i].updateLOD(cameraPos, maxDistSq, medDistSq);
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('lod');
             goblins[i].update(knights, dt, simulationSpeed);
         }
 
+        if (window.PerformanceProfiler) window.PerformanceProfiler.start('colisoes');
         resolveWarriorCollisions();
+        if (window.PerformanceProfiler) window.PerformanceProfiler.end('colisoes');
 
         for (let i = arrows.length - 1; i >= 0; i--) {
             const arrow = arrows[i];
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('flechas');
             arrow.update(dt, simulationSpeed);
             if (arrow.isDead) {
                 ArrowPool.release(arrow);
                 arrows.splice(i, 1);
             }
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('flechas');
         }
 
+        if (window.CombatProfiler) window.CombatProfiler.start('remoção de mortos');
         for (let i = deadWarriors.length - 1; i >= 0; i--) {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('lod');
             deadWarriors[i].updateLOD(cameraPos, maxDistSq, medDistSq);
+            if (window.PerformanceProfiler) {
+                window.PerformanceProfiler.end('lod');
+                window.PerformanceProfiler.start('ia_guerreiros');
+            }
             const completelySunk = deadWarriors[i].fadeAndSink(dt * simulationSpeed);
             if (completelySunk) {
                 deadWarriors.splice(i, 1);
             }
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('ia_guerreiros');
         }
+        if (window.CombatProfiler) window.CombatProfiler.end('remoção de mortos');
+
+        if (window.CombatProfiler) window.CombatProfiler.endFrame();
 
         // Animação das nuvens (deriva pelo céu)
+        if (window.PerformanceProfiler) window.PerformanceProfiler.start('nuvens');
         for (let i = 0; i < clouds.length; i++) {
             clouds[i].x += clouds[i].speedX * dt * simulationSpeed;
             clouds[i].z += clouds[i].speedZ * dt * simulationSpeed;
@@ -306,25 +605,40 @@ function animate() {
         if (clouds.length > 0) {
             updateCloudMatrices();
         }
+        if (window.PerformanceProfiler) window.PerformanceProfiler.end('nuvens');
+        
+        if (window.PerformanceProfiler) window.PerformanceProfiler.start('chuva');
         updateRain(dt);
         updateLightning(dt);
+        if (window.PerformanceProfiler) window.PerformanceProfiler.end('chuva');
 
+        if (window.PerformanceProfiler) window.PerformanceProfiler.start('particulas');
         updateParticles(dt);
+        if (window.PerformanceProfiler) window.PerformanceProfiler.end('particulas');
 
         for (let i = 0; i < catapults.length; i++) {
             const c = catapults[i];
             if (c.isDead) continue;
-            const opp = armies[c.faction].enemies;
+            const opp = window.armies[c.faction].enemies;
+            
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('lod');
             c.updateLOD(cameraPos, maxDistSq);
+            if (window.PerformanceProfiler) {
+                window.PerformanceProfiler.end('lod');
+                window.PerformanceProfiler.start('catapultas');
+            }
             c.update(opp, dt, simulationSpeed);
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('catapultas');
         }
 
         for (let i = boulders.length - 1; i >= 0; i--) {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('projeteis');
             boulders[i].update(dt, simulationSpeed);
             if (boulders[i].isDead) {
                 BoulderPool.release(boulders[i]);
                 boulders.splice(i, 1);
             }
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('projeteis');
         }
     }
 
@@ -385,7 +699,12 @@ function animate() {
     }
 
     renderWarriorsInstanced();
+    if (window.PerformanceProfiler) window.PerformanceProfiler.start('render_unidades');
     renderer.render(scene, camera);
+    if (window.PerformanceProfiler) {
+        window.PerformanceProfiler.end('render_unidades');
+        window.PerformanceProfiler.endFrame();
+    }
 }
 
 function updateCinematicCamera(delta, time) {

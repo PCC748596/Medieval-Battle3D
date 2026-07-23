@@ -41,6 +41,9 @@ function onPointerStart(x, y, button = 0) {
     prevPointerY = y;
 }
 
+const _controlsForwardCache = new THREE.Vector3();
+const _controlsRightCache = new THREE.Vector3();
+
 function onPointerMove(x, y) {
     if (!isPointerDown || !controls.enabled) return;
     const dx = x - prevPointerX;
@@ -48,9 +51,9 @@ function onPointerMove(x, y) {
 
     if (activeDragButton === 2) {
         // Mover a câmara (pan) usando o botão direito
-        const forward = new THREE.Vector3();
+        const forward = _controlsForwardCache;
         forward.set(controls.target.x - camera.position.x, 0, controls.target.z - camera.position.z).normalize();
-        const right = new THREE.Vector3(-forward.z, 0, forward.x);
+        const right = _controlsRightCache.set(-forward.z, 0, forward.x);
 
         const panSensitivity = radius * 0.0015;
 

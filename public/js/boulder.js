@@ -119,7 +119,7 @@ class Boulder {
         const ipx = this.mesh.position.x;
         const ipy = this.mesh.position.y;
         const ipz = this.mesh.position.z;
-        const enemies = armies[this.faction].enemies;
+        const enemies = window.armies[this.faction].enemies;
 
         const dmgMultiplier = (this.bounceCount === 0) ? 1.0 : 0.6;
         const radiusMultiplier = (this.bounceCount === 0) ? 1.0 : 0.75;

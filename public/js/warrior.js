@@ -1,5 +1,120 @@
 // --- CLASSE DO GUERREIRO MULTI-FUNÇÕES ---
 let warriorUidCounter = 0;
+const _spawnPosCache = new THREE.Vector3();
+
+function mergeGeometries(geos) {
+    let totalVertices = 0;
+    const preparedGeos = geos.map(g => {
+        let geo = g.geometry;
+        if (geo.index) {
+            geo = geo.toNonIndexed();
+        } else {
+            geo = geo.clone();
+        }
+        geo.applyMatrix4(g.matrix);
+        totalVertices += geo.attributes.position.count;
+        return {
+            geo: geo,
+            color: g.color
+        };
+    });
+
+    const positions = new Float32Array(totalVertices * 3);
+    const normals = new Float32Array(totalVertices * 3);
+    const uvs = new Float32Array(totalVertices * 2);
+    const colors = new Float32Array(totalVertices * 3);
+
+    let offset = 0;
+    preparedGeos.forEach(p => {
+        const geo = p.geo;
+        const posAttr = geo.attributes.position;
+        const normAttr = geo.attributes.normal;
+        const uvAttr = geo.attributes.uv;
+
+        const count = posAttr.count;
+
+        positions.set(posAttr.array, offset * 3);
+
+        if (normAttr) {
+            normals.set(normAttr.array, offset * 3);
+        }
+
+        if (uvAttr) {
+            uvs.set(uvAttr.array, offset * 2);
+        }
+
+        const c = p.color || new THREE.Color(0xffffff);
+        for (let i = 0; i < count; i++) {
+            colors[(offset + i) * 3] = c.r;
+            colors[(offset + i) * 3 + 1] = c.g;
+            colors[(offset + i) * 3 + 2] = c.b;
+        }
+
+        offset += count;
+        geo.dispose();
+    });
+
+    const mergedGeo = new THREE.BufferGeometry();
+    mergedGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    mergedGeo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    mergedGeo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    mergedGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    return mergedGeo;
+}
+
+window.animatedGeometries = {
+    knights: {
+        melee: { idle: null, walk: [], attack: [] },
+        archer: { idle: null, walk: [], attack: [] }
+    },
+    goblins: {
+        melee: { idle: null, walk: [], attack: [] },
+        archer: { idle: null, walk: [], attack: [] }
+    }
+};
+
+window.sharedMergedMaterial = new THREE.MeshLambertMaterial({
+    vertexColors: true
+});
+
+function getMergedGeometryForGroup(group, faction) {
+    const geos = [];
+    group.traverse(child => {
+        if (child.updateMatrix) child.updateMatrix();
+    });
+    group.updateMatrixWorld(true);
+
+    group.traverse(child => {
+        if (child.isMesh && child.name !== 'lodPrimitive') {
+            const relativeMatrix = new THREE.Matrix4().copy(group.matrixWorld).invert().multiply(child.matrixWorld);
+
+            let color = new THREE.Color(0xffffff);
+            if (child.material) {
+                if (child.material.color) {
+                    color.copy(child.material.color);
+                }
+                if (child.material.map) {
+                    if (child.name === 'shield') {
+                        color.copy(faction === 'knights' ? new THREE.Color(0x1f3c73) : new THREE.Color(0xb32424));
+                    } else if (child.name === 'torso') {
+                        color.copy(faction === 'knights' ? new THREE.Color(0x2c3e50) : new THREE.Color(0x5c7a43));
+                    }
+                }
+            }
+
+            geos.push({
+                geometry: child.geometry,
+                matrix: relativeMatrix,
+                color: color
+            });
+        }
+    });
+
+    if (geos.length === 0) return null;
+    return mergeGeometries(geos);
+}
+
 class Warrior {
     clone() { return {x:this.x, y:this.y, z:this.z}; }
     set(x,y,z) { this.x=x; this.y=y; this.z=z; }
@@ -17,7 +132,7 @@ class Warrior {
         this.hp = (role === 'melee') ? 220 : 100;
         this.maxHp = this.hp;
 
-        const army = armies[faction];
+        const army = window.armies[faction];
         const baseSpeed = (role === 'melee') ? army.baseSpeedMelee : army.baseSpeedArcher;
         this.speed = (baseSpeed + Math.random() * 0.02) * 60;
 
@@ -66,15 +181,39 @@ class Warrior {
         const terrainY = getTerrainHeight(x, z);
         this.terrainY = terrainY;
         this.set(x, terrainY + 1.5, z);
-        this.rotY = armies[faction].rotationY;
+        this.rotY = window.armies[faction].rotationY;
         this.lastTargetAngle = this.rotY;
+
+        // State Machine & Dirty Flags Optimization Setup
+        this.currentState = this.isFlanker ? 'FLANKING' : 'ADVANCING';
+        this.stateDirty = true;
+
+        // Dirty Flags Optimization Setup
+        this.positionDirty = true;
+        this.rotationDirty = true;
+        this.visibilityDirty = true;
+        this.colorDirty = true;
+        this.lodDirty = true;
+        this.matrixDirty = true;
+
+        this._lastX = undefined;
+        this._lastY = undefined;
+        this._lastZ = undefined;
+        this._lastRotX = undefined;
+        this._lastRotY = undefined;
+        this._lastRotZ = undefined;
+        this._lastVisible = undefined;
+        this._lastFlashed = undefined;
+        this._lastBaseColor = null;
+        this._lastLodLevel = undefined;
+        this._lastAnimTime = undefined;
     }
 
     assembleBody() {
         if (!templateMeshes[this.faction][this.role]) {
             const template = new THREE.Group();
 
-            const lodMat = armies[this.faction].lodMat();
+            const lodMat = window.armies[this.faction].lodMat();
             const lodGeo = (this.role === 'melee') ? lodGeoCube : lodGeoCircle;
             const lodPrimitive = new THREE.Mesh(lodGeo, lodMat);
             lodPrimitive.name = 'lodPrimitive';
@@ -84,7 +223,7 @@ class Warrior {
 
             if (currentTheme === 'napoleonic_3d') {
                 // --- TEMA NAPOLEÓNICO 3D (Substituído pelo modelo Low-Poly ultra leve pedido ~84 Tris) ---
-                const isFrench = armies[this.faction].isFrench;
+                const isFrench = window.armies[this.faction].isFrench;
                 const coatMat = new THREE.MeshLambertMaterial({ color: isFrench ? 0x1f3c73 : 0xb32424 });
                 const skinMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
                 const pantsMat = new THREE.MeshLambertMaterial({ color: 0x5c4033 });
@@ -128,7 +267,7 @@ class Warrior {
 
                 templateMeshes[this.faction][this.role] = template;
             } else if (currentTheme === 'napoleonic') {
-                const isFrench = armies[this.faction].isFrench;
+                const isFrench = window.armies[this.faction].isFrench;
                 const coatColor = isFrench ? 0x1f3c73 : 0xb32424;
                 const collarColor = isFrench ? 0xb32424 : 0x1f3c73;
                 const plumeColor = isFrench ? 0x2196F3 : 0xf44336;
@@ -340,7 +479,7 @@ class Warrior {
                     torso.add(quiverGroup);
                 }
 
-                const headMat = armies[this.faction].headMat();
+                const headMat = window.armies[this.faction].headMat();
                 const head = new THREE.Mesh(geomHead, headMat);
                 head.name = "head";
                 head.position.y = 1.3;
@@ -392,7 +531,7 @@ class Warrior {
 
                     const swordGroup = new THREE.Group();
                     swordGroup.name = "swordGroup";
-                    const blade = new THREE.Mesh(geomSwordBlade, armies[this.faction].bladeMat());
+                    const blade = new THREE.Mesh(geomSwordBlade, window.armies[this.faction].bladeMat());
                     blade.position.y = 0.75;
                     swordGroup.add(blade);
 
@@ -457,17 +596,79 @@ class Warrior {
 
                 templateMeshes[this.faction][this.role] = template;
             }
+            if (currentTheme !== 'napoleonic_3d') {
+                const rawTemplate = templateMeshes[this.faction][this.role];
+                const faction = this.faction;
+                const role = this.role;
+                const anims = window.animatedGeometries[faction][role];
+                
+                if (rawTemplate && !anims.idle) {
+                    // Create a mock warrior to apply poses
+                    const mock = {
+                        faction: faction,
+                        role: role,
+                        isDead: false,
+                        isAttacking: false,
+                        attackAnimProgress: 0,
+                        isTryingToMove: false,
+                        animTime: 0,
+                        knockback: null,
+                        isPusher: false,
+                        hasTorch: false,
+                        isDaggerArcher: false,
+                        dummy: rawTemplate,
+                        lodLevel: 0,
+                        cacheDummyParts: Warrior.prototype.cacheDummyParts
+                    };
+                    
+                    // 1. Idle geometry
+                    Warrior.prototype.applyPoseToDummy.call(mock, rawTemplate);
+                    anims.idle = getMergedGeometryForGroup(rawTemplate, faction);
+                    
+                    // 2. Walk geometries (8 frames)
+                    for (let i = 0; i < 8; i++) {
+                        const animTime = (i / 8) * 2 * Math.PI;
+                        mock.isTryingToMove = true;
+                        mock.animTime = animTime;
+                        mock.isAttacking = false;
+                        Warrior.prototype.applyPoseToDummy.call(mock, rawTemplate);
+                        anims.walk.push(getMergedGeometryForGroup(rawTemplate, faction));
+                    }
+                    
+                    // 3. Attack geometries (6 frames)
+                    for (let i = 0; i < 6; i++) {
+                        const progress = i / 5;
+                        mock.isTryingToMove = false;
+                        mock.isAttacking = true;
+                        mock.attackAnimProgress = progress;
+                        Warrior.prototype.applyPoseToDummy.call(mock, rawTemplate);
+                        anims.attack.push(getMergedGeometryForGroup(rawTemplate, faction));
+                    }
+                    
+                    // Restore template to idle pose
+                    mock.isTryingToMove = false;
+                    mock.isAttacking = false;
+                    Warrior.prototype.applyPoseToDummy.call(mock, rawTemplate);
+                }
+            }
         }
 
         this.baseColor = new THREE.Color(0xffffff);
         if (this.isPusher) {
-            const colorHex = armies[this.faction].colorHex;
+            const colorHex = window.armies[this.faction].colorHex;
             this.baseColor.setHex(colorHex);
             this.scale = 1.15;
         } else {
             this.scale = 1.0;
         }
         this.visible = true;
+
+        const template = templateMeshes[this.faction][this.role];
+        if (template) {
+            this.dummy = template.clone();
+        } else {
+            this.dummy = new THREE.Group();
+        }
     }
     getAvoidanceDir(dir) {
         if (this.lodLevel >= 2) return dir; // Skip avoidance entirely for very far units!
@@ -475,6 +676,7 @@ class Warrior {
             return _tmpVec3C.copy(dir).applyAxisAngle(_axisY, this.stuckAngleOffset);
         }
 
+        if (window.PerformanceProfiler) window.PerformanceProfiler.start('desvio_obstaculos');
         const px = this.x;
         const pz = this.z;
 
@@ -596,7 +798,15 @@ class Warrior {
             }
         }
 
+        if (window.PerformanceProfiler) {
+            window.PerformanceProfiler.end('desvio_obstaculos');
+            window.PerformanceProfiler.start('desvio_aliados');
+        }
+
         // 5. Desvio de Aliados Engajados / Parados para evitar empurrões por trás e manter as fileiras organizadas
+        this._isBlockedByAlly = false;
+        let blockScore = 0;
+
         if (window.spatialGrid && window.GRID_COLS && window.GRID_CELL_SIZE) {
             const gridCols = window.GRID_COLS;
             const cellSize = window.GRID_CELL_SIZE;
@@ -618,12 +828,13 @@ class Warrior {
                     const cell = window.spatialGrid[c + r * gridCols];
                     if (!cell || cell.length === 0) continue;
                     
+                    if (window.CombatProfiler) window.CombatProfiler.start('qualquer loop sobre aliados');
                     for (let i = 0; i < cell.length; i++) {
                         const ally = cell[i];
                         if (ally === this || ally.isDead || ally.faction !== this.faction) continue;
                         
                         // Verifica se o aliado está parado ou engajado
-                        const isAllyEngaged = ally.role === 'melee' && ally.target && !ally.target.isDead && (ally.lastVelocity.lengthSq() < 0.1 || ally.isAttacking);
+                        const isAllyEngaged = (ally.role === 'melee' && ally.target && !ally.target.isDead && (ally.lastVelocity.lengthSq() < 0.1 || ally.isAttacking)) || ally.currentState === 'WAITING';
                         if (!isAllyEngaged) continue;
                         
                         const dx = px - ally.x;
@@ -640,7 +851,12 @@ class Warrior {
                             // Produto escalar frontal: se > 0, o aliado está na nossa frente
                             const dotForward = relX * dir.x + relZ * dir.z;
                             
-                            if (dotForward > 0) {
+                            if (dotForward > 0.3) {
+                                blockScore += (avoidanceRadius - dist) / avoidanceRadius;
+                                if (dist < 2.0) {
+                                    this._isBlockedByAlly = true; // Bloqueado diretamente
+                                }
+                                
                                 // O aliado está na nossa frente! Aplica força lateral de desvio
                                 const latX = -dir.z;
                                 const latZ = dir.x;
@@ -664,9 +880,15 @@ class Warrior {
                             }
                         }
                     }
+                    if (window.CombatProfiler) window.CombatProfiler.end('qualquer loop sobre aliados');
                 }
             }
+            if (blockScore > 1.2) {
+                this._isBlockedByAlly = true;
+            }
         }
+
+        if (window.PerformanceProfiler) window.PerformanceProfiler.end('desvio_aliados');
 
         // Se houver alguma força de repulsão, combina com a direção de caminhada
         if (repelX !== 0 || repelZ !== 0) {
@@ -680,8 +902,10 @@ class Warrior {
     }
 
     applyKnockback(direction, force, duration, launchY = 0) {
+        if (window.CombatProfiler) window.CombatProfiler.start('knockback');
         this.knockback.copy(direction).normalize().multiplyScalar(force);
         this.knockbackTimer = duration;
+        this.stateDirty = true; // --- EVENTO: sofreu knockback ---
         if (launchY > 0) {
             this.launchVY = launchY;
             this.launchKills = true;
@@ -690,6 +914,7 @@ class Warrior {
             this.tumbleY = (Math.random() - 0.5) * 12;
             this.tumbleZ = (Math.random() - 0.5) * 18;
         }
+        if (window.CombatProfiler) window.CombatProfiler.end('knockback');
     }
 
     smoothTurn(targetAngle, delta, simSpeed) {
@@ -762,8 +987,106 @@ class Warrior {
         }
     }
 
+    cacheDummyParts() {
+        if (this._partsCached) return;
+        const dummy = this.dummy;
+        if (!dummy) return;
+        this._cachedLodPrimitive = dummy.getObjectByName("lodPrimitive");
+        this._cachedTorso = dummy.getObjectByName("torso");
+        this._cachedArmL = dummy.getObjectByName("armL");
+        this._cachedArmR = dummy.getObjectByName("armR");
+        this._cachedLegL = dummy.getObjectByName("legL");
+        this._cachedLegR = dummy.getObjectByName("legR");
+        this._cachedNapoleonicGltf = dummy.getObjectByName("napoleonic_gltf") || dummy.getObjectByName("Soldado");
+        this._cachedBowGroup = dummy.getObjectByName("bowGroup");
+        this._cachedBowString = dummy.getObjectByName("bowString");
+        this._cachedTorchGroup = dummy.getObjectByName("torchGroup");
+        this._partsCached = true;
+    }
+
+    updateDirtyFlags() {
+        // 1. Position
+        const posChanged = (this.x !== this._lastX || this.y !== this._lastY || this.z !== this._lastZ);
+        if (posChanged) {
+            this.positionDirty = true;
+            this._lastX = this.x;
+            this._lastY = this.y;
+            this._lastZ = this.z;
+        }
+
+        // 2. Rotation
+        const rX = this.rotX || 0;
+        const rY = this.rotY || 0;
+        const rZ = this.rotZ || 0;
+        const rotChanged = (rX !== this._lastRotX || rY !== this._lastRotY || rZ !== this._lastRotZ);
+        if (rotChanged) {
+            this.rotationDirty = true;
+            this._lastRotX = rX;
+            this._lastRotY = rY;
+            this._lastRotZ = rZ;
+        }
+
+        // 3. Visibility
+        const visChanged = (this.visible !== this._lastVisible);
+        if (visChanged) {
+            this.visibilityDirty = true;
+            this._lastVisible = this.visible;
+        }
+
+        // 4. Color
+        const isFlashed = this.flashTimer > 0;
+        let colorChanged = (isFlashed !== this._lastFlashed);
+        if (!colorChanged && this.baseColor) {
+            if (!this._lastBaseColor || !this.baseColor.equals(this._lastBaseColor)) {
+                colorChanged = true;
+            }
+        } else if (!colorChanged && !this.baseColor && this._lastBaseColor) {
+            colorChanged = true;
+        }
+        if (colorChanged) {
+            this.colorDirty = true;
+            this._lastFlashed = isFlashed;
+            if (this.baseColor) {
+                if (!this._lastBaseColor) this._lastBaseColor = new THREE.Color();
+                this._lastBaseColor.copy(this.baseColor);
+            } else {
+                this._lastBaseColor = null;
+            }
+        }
+
+        // 5. LOD
+        const lodChanged = (this.lodLevel !== this._lastLodLevel);
+        if (lodChanged) {
+            this.lodDirty = true;
+            this._lastLodLevel = this.lodLevel;
+        }
+
+        // 6. Scale (Safe backup)
+        const scaleVal = this.scale || 1.0;
+        let scaleChanged = false;
+        if (scaleVal !== this._lastScale) {
+            scaleChanged = true;
+            this._lastScale = scaleVal;
+        }
+
+        // 7. Matrix
+        const isMoving = this.lastVelocity && this.lastVelocity.lengthSq() > 0.0001;
+        const animActive = !this.isDead && (this.isAttacking || isMoving || this.animTime !== this._lastAnimTime);
+        this._lastAnimTime = this.animTime;
+
+        if (this.positionDirty || this.rotationDirty || this.lodDirty || scaleChanged || animActive) {
+            this.matrixDirty = true;
+        }
+    }
+
     update(opponents, delta, simSpeed) {
-        if (this.isDead) return;
+        if (window.PerformanceProfiler) window.PerformanceProfiler.start('ia_guerreiros');
+        if (this.isDead) {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('ia_guerreiros');
+            return;
+        }
+
+        if (window.CombatProfiler) window.CombatProfiler.start('atualização do estado');
 
         const prevX = this.x;
         const prevZ = this.z;
@@ -814,7 +1137,9 @@ class Warrior {
         this.animTime += delta * 15 * simSpeed * terrainSpeed;
 
         if (this.attackCooldown > 0) {
+            if (window.CombatProfiler) window.CombatProfiler.start('cooldown');
             this.attackCooldown -= delta * simSpeed;
+            if (window.CombatProfiler) window.CombatProfiler.end('cooldown');
         }
 
         if (this.stuckDuration > 0) {
@@ -824,7 +1149,16 @@ class Warrior {
         this.updateFlash(delta);
 
         if (this.isAttacking) {
-            this.updateAttackLogic(delta, simSpeed);
+            const isShooter = (this.role === 'archer' || isNapoleonicTheme()) && !this.isDaggerArcher;
+            if (isShooter) {
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('arqueiros');
+                this.updateAttackLogic(delta, simSpeed);
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('arqueiros');
+            } else {
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('combate_corpo_corpo');
+                this.updateAttackLogic(delta, simSpeed);
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('combate_corpo_corpo');
+            }
         }
 
         if (this.morale <= 4 && !this.isFleeing && !this.isPusher) {
@@ -846,12 +1180,14 @@ class Warrior {
                     this.lastVelocity.set(0, 0, 0);
                     this.isTryingToMove = false;
                 } else {
-                    const dirX = armies[this.faction].dirX;
+                    const dirX = window.armies[this.faction].dirX;
                     let moveDir = _tmpVec3D.set(dirX, 0, 0);
                     moveDir = this.getAvoidanceDir(moveDir);
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('movimento');
                     this.lastVelocity.copy(moveDir).multiplyScalar(this.speed * 1.3);
                     this.lastTargetAngle = Math.atan2(moveDir.x, moveDir.z);
                     this.isTryingToMove = true;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('movimento');
                 }
             } else {
                 this.lastVelocity.set(0, 0, 0);
@@ -876,13 +1212,16 @@ class Warrior {
         }
 
         // --- APLICAÇÃO DO MOVIMENTO ---
+        if (window.PerformanceProfiler) window.PerformanceProfiler.start('movimento');
         if (this.knockbackTimer > 0) {
+            if (window.CombatProfiler) window.CombatProfiler.start('knockback');
             this.x += this.knockback.x * delta * simSpeed; this.y += this.knockback.y * delta * simSpeed; this.z += this.knockback.z * delta * simSpeed;
             this.knockback.multiplyScalar(Math.pow(0.85, delta * 60));
             this.knockbackTimer -= delta * simSpeed;
             if (this.lodLevel === 0) {
                 
             }
+            if (window.CombatProfiler) window.CombatProfiler.end('knockback');
         } else {
             this.x += this.lastVelocity.x * delta * simSpeed * terrainSpeed;
             this.z += this.lastVelocity.z * delta * simSpeed * terrainSpeed;
@@ -891,13 +1230,16 @@ class Warrior {
                 if (this.lodLevel === 0) {
                     
                 }
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('steering');
                 this.smoothTurn(this.lastTargetAngle, delta, simSpeed);
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('steering');
             } else {
                 if (!this.isAttacking && this.lodLevel === 0) {
                     
                 }
             }
         }
+        if (window.PerformanceProfiler) window.PerformanceProfiler.end('movimento');
 
         // Ajuste de altura no terreno e limite de arena
         if (this.lastVelocity.lengthSq() > 0.0001 || this.knockbackTimer > 0 || this.launchVY !== 0) {
@@ -922,6 +1264,8 @@ class Warrior {
                 if (this.launchKills) {
                     this.launchKills = false;
                     this.takeDamage(9999, null);
+                    if (window.CombatProfiler) window.CombatProfiler.end('atualização do estado');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('ia_guerreiros');
                     return;
                 }
             }
@@ -952,6 +1296,8 @@ class Warrior {
         } else {
             this.stuckTimer = 0;
         }
+        if (window.CombatProfiler) window.CombatProfiler.end('atualização do estado');
+        if (window.PerformanceProfiler) window.PerformanceProfiler.end('ia_guerreiros');
     }
 
     updateHeavyAIAndPhysics(opponents, delta, simSpeed) {
@@ -962,8 +1308,27 @@ class Warrior {
             this.lastVelocity.set(0, 0, 0);
             this.isTryingToMove = false;
             this.isAttacking = false;
+            this.currentState = 'WAITING';
+            this.stateDirty = false;
             return;
         }
+
+        // --- SISTEMA DE TELEMETRIA / CONTABILIZAÇÃO DE CHAMADAS ---
+        if (!window.stateMetrics) {
+            window.stateMetrics = { callsBefore: 0, callsAfter: 0 };
+        }
+        window.stateMetrics.callsBefore++;
+
+        // --- STATE DIRTY FLAG OPTIMIZATION CHECK ---
+        // Se o estado não foi marcado como "dirty", podemos usar a lógica leve em vez da busca pesada e desvios complexos!
+        if (!this.stateDirty) {
+            this.runLightweightStateBypass(opponents, delta, simSpeed);
+            return;
+        }
+
+        window.stateMetrics.callsAfter++;
+
+        this.stateDirty = false; // reseta a flag de dirty
 
         // --- ARVORE DE COMPORTAMENTO (BEHAVIOR TREE) ---
         // Seletor Root: Executa sequências de comportamento de acordo com a prioridade das ações.
@@ -974,6 +1339,135 @@ class Warrior {
         // Fallback: Se nenhuma ramificação for selecionada, garanta inércia
         this.lastVelocity.set(0, 0, 0);
         this.isTryingToMove = false;
+        this.currentState = 'WAITING';
+    }
+
+    runLightweightStateBypass(opponents, delta, simSpeed) {
+        if (this.isDead) {
+            this.currentState = 'DEAD';
+            this.stateDirty = false;
+            return;
+        }
+
+        // pushers continuam no modo especial para acompanhar catapulta
+        if (this.isPusher && this.catapult && !this.catapult.isDead) {
+            if (this.aiTick % 12 === 0) {
+                this.stateDirty = true;
+            }
+            return;
+        }
+
+        // WAITING state periodically checks if it should re-evaluate blocked status
+        if (this.currentState === 'WAITING') {
+            const waitingCheckFreq = this.lodLevel >= 2 ? 48 : 12; // ~200-300ms
+            if (this.aiTick % waitingCheckFreq === 0) {
+                this.stateDirty = true;
+            }
+            this.lastVelocity.set(0, 0, 0);
+            this.isTryingToMove = false;
+            return;
+        }
+
+        // Sem alvo válido: ADVANCING ou FLANKING
+        if (!this.target || this.target.isDead) {
+            this.target = null;
+            this.isAttacking = false;
+
+            // Busca novo alvo a cada freq reduzida se estiver avançando/flanqueando
+            const targetSearchFreq = this.lodLevel >= 2 ? 48 : 12;
+            if (this.aiTick % targetSearchFreq === 0) {
+                this.stateDirty = true;
+                return;
+            }
+
+            if (this.isFlanker) {
+                this.currentState = 'FLANKING';
+                const dirX = window.armies[this.faction].dirX;
+                const flankDirZ = (this.uid % 2 === 0) ? 1.0 : -1.0;
+                this.lastVelocity.set(dirX * this.speed * 0.7, 0, flankDirZ * this.speed * 0.7);
+                this.lastTargetAngle = Math.atan2(this.lastVelocity.x, this.lastVelocity.z);
+                this.isTryingToMove = true;
+            } else {
+                this.currentState = 'ADVANCING';
+                const dirX = window.armies[this.faction].dirX;
+                this.lastVelocity.set(dirX * this.speed, 0, 0);
+                this.lastTargetAngle = Math.atan2(dirX, 0) + Math.PI;
+                this.isTryingToMove = true;
+            }
+            return;
+        }
+
+        // Temos alvo vivo e válido!
+        const dx = this.target.x - this.x;
+        const dz = this.target.z - this.z;
+        const distSq = dx * dx + dz * dz;
+
+        const targetRadius = this.target.radius || 0.8;
+        const isMeleeCombatant = (this.role === 'melee' || this.isDaggerArcher);
+        const actualAttackRange = isMeleeCombatant ? (this.attackRange - 0.8 + targetRadius) : this.attackRange;
+        const actualAttackRangeSq = actualAttackRange * actualAttackRange;
+
+        // Reprocessamento preventivo ocasional de desvios e rotas
+        const reevaluateFreq = this.lodLevel >= 2 ? 48 : 24;
+        if (this.aiTick % reevaluateFreq === 0) {
+            this.stateDirty = true;
+            return;
+        }
+
+        if (isMeleeCombatant) {
+            if (distSq > actualAttackRangeSq) {
+                // --- EVENTO: Alvo saiu do alcance ---
+                if (this.currentState === 'FIGHTING') {
+                    this.stateDirty = true;
+                    return;
+                }
+                this.currentState = 'MOVING';
+                // Cálculo de velocidade direto super leve, sem os custos do desvio de obstáculos contínuo!
+                let dir = _tmpVec3A.set(dx, 0, dz).normalize();
+                this.lastVelocity.set(dir.x * this.speed, 0, dir.z * this.speed);
+                this.lastTargetAngle = Math.atan2(dx, dz) + Math.PI;
+                this.isTryingToMove = true;
+            } else {
+                // --- EVENTO: Chegou ao destino ---
+                if (this.currentState !== 'FIGHTING') {
+                    this.stateDirty = true;
+                    return;
+                }
+                this.lastVelocity.set(0, 0, 0);
+                this.isTryingToMove = false;
+            }
+        } else {
+            // Atiradores/Arqueiros
+            const keepDistSq = this.keepDistanceRange * this.keepDistanceRange;
+            if (distSq < keepDistSq) {
+                if (this.currentState === 'FIGHTING') {
+                    this.stateDirty = true;
+                    return;
+                }
+                this.currentState = 'MOVING';
+                let dir = _tmpVec3A.set(-dx, 0, -dz).normalize();
+                this.lastVelocity.set(dir.x * this.speed * 0.7, 0, dir.z * this.speed * 0.7);
+                this.lastTargetAngle = Math.atan2(-dx, -dz) + Math.PI;
+                this.isTryingToMove = true;
+            } else if (distSq > actualAttackRangeSq) {
+                if (this.currentState === 'FIGHTING') {
+                    this.stateDirty = true;
+                    return;
+                }
+                this.currentState = 'MOVING';
+                let dir = _tmpVec3A.set(dx, 0, dz).normalize();
+                this.lastVelocity.set(dir.x * this.speed, 0, dir.z * this.speed);
+                this.lastTargetAngle = Math.atan2(dx, dz) + Math.PI;
+                this.isTryingToMove = true;
+            } else {
+                if (this.currentState !== 'FIGHTING') {
+                    this.stateDirty = true;
+                    return;
+                }
+                this.lastVelocity.set(0, 0, 0);
+                this.isTryingToMove = false;
+            }
+        }
     }
 
     // --- ARVORE DE COMPORTAMENTO: COMPORTAMENTO DE EMPURRADOR DE CATAPULTA (SEQUÊNCIA/SELETOR) ---
@@ -998,31 +1492,37 @@ class Warrior {
         const cx = cat.mesh.position.x;
         const cz = cat.mesh.position.z;
 
+        if (window.CombatProfiler) window.CombatProfiler.start('qualquer loop sobre inimigos');
         for (let i = 0; i < opponents.length; i++) {
             const e = opponents[i];
             if (e.isDead) continue;
+            if (window.CombatProfiler) window.CombatProfiler.start('cálculo de distância');
             const dx = e.x - cx;
             const dz = e.z - cz;
             const distSq = dx * dx + dz * dz;
+            if (window.CombatProfiler) window.CombatProfiler.end('cálculo de distância');
             if (distSq < minDistSq) {
                 minDistSq = distSq;
                 nearestEnemy = e;
             }
         }
+        if (window.CombatProfiler) window.CombatProfiler.end('qualquer loop sobre inimigos');
 
         if (nearestEnemy) {
             this.target = nearestEnemy;
             return false; // Continua para o comportamento normal de combate utilizando o novo alvo
         } else {
             // Se não houver perigos próximos, retorna/mantém-se na posição de empurrar
-            const dir = armies[this.faction].catapultDir;
+            const dir = window.armies[this.faction].catapultDir;
             const offsetZ = (this.uid % 2 === 0) ? -1.2 : 1.2;
             const tx = cx - dir * 3.4;
             const tz = cz + offsetZ;
 
+            if (window.CombatProfiler) window.CombatProfiler.start('cálculo de distância');
             const dx = tx - this.x;
             const dz = tz - this.z;
             const distSq = dx * dx + dz * dz;
+            if (window.CombatProfiler) window.CombatProfiler.end('cálculo de distância');
             if (distSq > 0.5) {
                 this.target = null;
                 this.lastVelocity.set(dx, 0, dz).normalize().multiplyScalar(this.speed);
@@ -1046,10 +1546,16 @@ class Warrior {
         this.isKiting = false;
 
         // Verifica se o alvo é válido e está vivo
-        if (this.target && !this.target.isDead) {
+        if (window.CombatProfiler) window.CombatProfiler.start('validação do alvo atual');
+        const hasValidTarget = (this.target && !this.target.isDead);
+        if (window.CombatProfiler) window.CombatProfiler.end('validação do alvo atual');
+
+        if (hasValidTarget) {
+            if (window.CombatProfiler) window.CombatProfiler.start('cálculo de distância');
             const dx = this.target.x - this.x;
             const dz = this.target.z - this.z;
             const distSq = dx * dx + dz * dz;
+            if (window.CombatProfiler) window.CombatProfiler.end('cálculo de distância');
 
             this.lastTargetAngle = Math.atan2(dx, dz) + Math.PI;
 
@@ -1060,28 +1566,50 @@ class Warrior {
 
             if (isMeleeCombatant) {
                 if (distSq > actualAttackRangeSq) {
+                    this.currentState = 'MOVING';
                     this.moveTowardsTarget(delta, simSpeed);
                 } else {
+                    this.currentState = 'FIGHTING';
                     this.lastVelocity.set(0, 0, 0);
                     this.stopAndAttack(simSpeed);
                 }
             } else {
                 // Comportamento de Atirador (Arqueiro / Mosqueteiro)
-                if (distSq < this.keepDistanceRange * this.keepDistanceRange) {
+                if (window.CombatProfiler) window.CombatProfiler.start('cálculo de distância');
+                const keepDistSq = this.keepDistanceRange * this.keepDistanceRange;
+                if (window.CombatProfiler) window.CombatProfiler.end('cálculo de distância');
+
+                if (distSq < keepDistSq) {
+                    this.currentState = 'MOVING';
                     this.kiteTarget(delta, simSpeed);
                     this.isKiting = true;
                 } else if (distSq > actualAttackRangeSq) {
+                    this.currentState = 'MOVING';
                     this.moveTowardsTarget(delta, simSpeed);
                 } else {
+                    this.currentState = 'FIGHTING';
                     this.lastVelocity.set(0, 0, 0);
                     this.stopAndAttack(simSpeed);
                 }
             }
         } else {
-            // Se o alvo morreu ou se tornou nulo, pare imediatamente qualquer animação ou movimento ofensivo
+            // Se o alvo morreu ou se não tem alvo, avance na direção inimiga base da facção
             this.target = null;
-            this.lastVelocity.set(0, 0, 0);
             this.isAttacking = false;
+            if (this.isFlanker) {
+                this.currentState = 'FLANKING';
+                const dirX = window.armies[this.faction].dirX;
+                const flankDirZ = (this.uid % 2 === 0) ? 1.0 : -1.0;
+                this.lastVelocity.set(dirX * this.speed * 0.7, 0, flankDirZ * this.speed * 0.7);
+                this.lastTargetAngle = Math.atan2(this.lastVelocity.x, this.lastVelocity.z);
+                this.isTryingToMove = true;
+            } else {
+                this.currentState = 'ADVANCING';
+                const dirX = window.armies[this.faction].dirX;
+                this.lastVelocity.set(dirX * this.speed, 0, 0);
+                this.lastTargetAngle = Math.atan2(dirX, 0) + Math.PI;
+                this.isTryingToMove = true;
+            }
         }
 
         resolveLogCollisions(this);
@@ -1092,10 +1620,17 @@ class Warrior {
         if (!this.aiTick) this.aiTick = 0;
         this.aiTick++;
         
-        if ((this.role === 'melee' || this.isDaggerArcher) && this.target && !this.target.isDead) {
+        if (window.CombatProfiler) window.CombatProfiler.start('validação do alvo atual');
+        const hasTarget = (this.target && !this.target.isDead);
+        if (window.CombatProfiler) window.CombatProfiler.end('validação do alvo atual');
+
+        if ((this.role === 'melee' || this.isDaggerArcher) && hasTarget) {
+            if (window.CombatProfiler) window.CombatProfiler.start('cálculo de distância');
             const dx = this.target.x - this.x;
             const dz = this.target.z - this.z;
             const distSq = dx * dx + dz * dz;
+            if (window.CombatProfiler) window.CombatProfiler.end('cálculo de distância');
+
             const targetRadius = this.target.radius || 0.8;
             const actualAttackRange = this.attackRange - 0.8 + targetRadius;
             if (distSq <= actualAttackRange * actualAttackRange) {
@@ -1105,12 +1640,16 @@ class Warrior {
         }
         
         const aiFreq = this.lodLevel >= 2 ? 24 : (this.lodLevel === 1 ? 12 : 6);
-        if (this.aiTick % aiFreq !== 0 && this.target && !this.target.isDead) return;
+        if (this.aiTick % aiFreq !== 0 && hasTarget) return;
 
         const findFreq = this.lodLevel >= 2 ? 96 : (this.lodLevel === 1 ? 48 : 24);
-        if (!this.target || this.target.isDead || this.aiTick % findFreq === 0) {
+        const needsSearch = (!this.target || this.target.isDead || this.aiTick % findFreq === 0);
+        if (needsSearch) {
+            if (window.CombatProfiler) window.CombatProfiler.start('procura de novo alvo');
             let bestTarget = null;
 
+            if (window.CombatProfiler) window.CombatProfiler.start('busca de inimigo');
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('busca_inimigos');
             // 1. Tenta buscar inimigo vivo próximo usando o Grid Espacial (O(1))
             if (window.findNearestEnemyInGrid) {
                 bestTarget = window.findNearestEnemyInGrid(this);
@@ -1119,6 +1658,7 @@ class Warrior {
             // 2. Se não encontrar nenhum inimigo próximo no Grid (armadas distantes no início),
             // escolhe um oponente vivo aleatório para marchar na direção dele.
             if (!bestTarget && opponents.length > 0) {
+                if (window.CombatProfiler) window.CombatProfiler.start('qualquer loop sobre inimigos');
                 for (let attempt = 0; attempt < 5; attempt++) {
                     const idx = Math.floor(Math.random() * opponents.length);
                     const enemy = opponents[idx];
@@ -1137,33 +1677,49 @@ class Warrior {
                         }
                     }
                 }
+                if (window.CombatProfiler) window.CombatProfiler.end('qualquer loop sobre inimigos');
             }
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('busca_inimigos');
+            if (window.CombatProfiler) window.CombatProfiler.end('busca de inimigo');
 
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('selecao_alvo');
             // 3. Se houver catapultas inimigas e formos Flankers ou DaggerArchers (ou a cada tick longo de busca),
             // prioriza atacar a catapulta se ela estiver ao alcance visual ou estratégico.
             const catapults = battleManager.getCatapults();
-            if (catapults.length > 0 && (this.isFlanker || this.isDaggerArcher || this.aiTick % 96 === 0)) {
+            if (catapults.length > 0) {
                 const p1 = this;
+                if (window.CombatProfiler) window.CombatProfiler.start('qualquer loop sobre inimigos');
                 for (let i = 0; i < catapults.length; i++) {
                     const cat = catapults[i];
                     if (cat.isDead || cat.faction === this.faction) continue;
 
                     const catPos = cat.mesh.position;
+                    if (window.CombatProfiler) window.CombatProfiler.start('cálculo de distância');
                     const dx = p1.x - catPos.x;
                     const dz = p1.z - catPos.z;
                     const dSq = dx * dx + dz * dz;
+                    if (window.CombatProfiler) window.CombatProfiler.end('cálculo de distância');
 
                     // Se a catapulta estiver próxima (~40 unidades) ou se formos flanqueadores/dagger archers dedicados
-                    if (dSq < 1600 || this.isFlanker || this.isDaggerArcher) {
+                    if (dSq < 200 || (dSq < 1600 && (this.isFlanker || this.isDaggerArcher || this.aiTick % 96 === 0)) || this.isFlanker || this.isDaggerArcher) {
                         bestTarget = cat;
                         break;
                     }
                 }
+                if (window.CombatProfiler) window.CombatProfiler.end('qualquer loop sobre inimigos');
             }
 
             if (bestTarget) {
-                this.target = bestTarget;
+                if (this.target !== bestTarget) {
+                    if (window.CombatProfiler) window.CombatProfiler.start('troca de alvo');
+                    this.target = bestTarget;
+                    if (window.CombatProfiler) window.CombatProfiler.end('troca de alvo');
+                } else {
+                    this.target = bestTarget;
+                }
             }
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('selecao_alvo');
+            if (window.CombatProfiler) window.CombatProfiler.end('procura de novo alvo');
         }
     }
 
@@ -1180,6 +1736,17 @@ class Warrior {
         dir.applyAxisAngle(_axisY, sideAngle);
 
         dir = this.getAvoidanceDir(dir);
+        
+        if (this._isBlockedByAlly) {
+            if (!this.isFlanker) {
+                this.currentState = 'WAITING';
+                this.lastVelocity.set(0, 0, 0);
+                this.isTryingToMove = false;
+                return;
+            } else {
+                this.currentState = 'FLANKING';
+            }
+        }
 
         this.lastVelocity.set(dir.x * this.speed, 0, dir.z * this.speed);
         this.isTryingToMove = true;
@@ -1209,10 +1776,10 @@ class Warrior {
     }
 
     stopAndAttack(simSpeed) {
-
+        if (window.CombatProfiler) window.CombatProfiler.start('ataque');
         const isShooter = (this.role === 'archer' || isNapoleonicTheme()) && !this.isDaggerArcher;
         if (!isShooter) {
-            const isTargetCatapult = (this.target && this.target.constructor.name === 'Catapult');
+            const isTargetCatapult = (this.target && this.target.isCatapult);
             if (isTargetCatapult) {
                 if (this.attackCooldown <= 0 && !this.isAttacking) {
                     this.isAttacking = true;
@@ -1250,10 +1817,12 @@ class Warrior {
                 this.attackAnimProgress = 0;
             }
         }
+        if (window.CombatProfiler) window.CombatProfiler.end('ataque');
     }
 
 
     takeDamage(amount, attacker) {
+        if (window.CombatProfiler) window.CombatProfiler.start('aplicação de dano');
         this.hp -= amount;
         this.morale = Math.max(1, this.morale - 1);
         this.flashTimer = 0.12; // Inicia flash sem setTimeout
@@ -1268,6 +1837,7 @@ class Warrior {
         if (this.hp <= 0 && !this.isDead) {
             this.die(attacker);
         }
+        if (window.CombatProfiler) window.CombatProfiler.end('aplicação de dano');
     }
 
     updateFlash(delta) {
@@ -1280,7 +1850,10 @@ class Warrior {
     }
 
     die(killer) {
+        if (window.CombatProfiler) window.CombatProfiler.start('morte');
         this.isDead = true;
+        this.currentState = 'DEAD';
+        this.stateDirty = false;
         this.isAttacking = false;
         this.isTryingToMove = false;
         this.isKiting = false;
@@ -1292,16 +1865,42 @@ class Warrior {
 
         HUD.updateKills(battleManager.getKills());
 
-        armies[this.faction].addDeadCount();
-        const idx = armies[this.faction].list.indexOf(this);
-        if (idx !== -1) armies[this.faction].list.splice(idx, 1);
-        HUD.updateArmy(this.faction, armies[this.faction].list.length);
+        window.armies[this.faction].addDeadCount();
+        const idx = window.armies[this.faction].list.indexOf(this);
+        if (idx !== -1) window.armies[this.faction].list.splice(idx, 1);
+        HUD.updateArmy(this.faction, window.armies[this.faction].list.length);
 
         battleManager.getDeadWarriors().push(this);
 
         this.rotZ = Math.PI / 2 * (Math.random() > 0.5 ? 1 : -1);
         this.y = getTerrainHeight(this.x, this.z) + 0.2;
 
+        // --- EVENTO: Alvo morreu ---
+        // Notifica inimigos que tinham esse guerreiro como alvo para escolherem um novo alvo
+        const enemyFaction = this.faction === 'knights' ? 'goblins' : 'knights';
+        const enemyList = window.armies[enemyFaction].list;
+        for (let i = 0; i < enemyList.length; i++) {
+            const enemy = enemyList[i];
+            if (enemy.target === this) {
+                enemy.target = null;
+                enemy.stateDirty = true;
+            }
+        }
+
+        // --- EVENTO: Abriu espaço na formação ---
+        // Notifica aliados próximos que um guerreiro morreu para recalcularem seus desvios e posições
+        const allyList = window.armies[this.faction].list;
+        for (let i = 0; i < allyList.length; i++) {
+            const ally = allyList[i];
+            if (ally === this) continue;
+            const dx = ally.x - this.x;
+            const dz = ally.z - this.z;
+            if (dx * dx + dz * dz < 15 * 15) { // raio de 15 metros
+                ally.stateDirty = true;
+            }
+        }
+
+        if (window.CombatProfiler) window.CombatProfiler.end('morte');
     }
 
     fadeAndSink(delta) {
@@ -1317,7 +1916,11 @@ class Warrior {
 
 
     updateAttackLogic(delta, simSpeed) {
-        if (!this.isAttacking) return;
+        if (window.CombatProfiler) window.CombatProfiler.start('animação de ataque');
+        if (!this.isAttacking) {
+            if (window.CombatProfiler) window.CombatProfiler.end('animação de ataque');
+            return;
+        }
         const isShooter = (this.role === 'archer' || isNapoleonicTheme()) && !this.isDaggerArcher;
         const animSpeed = isShooter ? (isNapoleonicTheme() ? 0.85 : 6) : 12;
         this.attackAnimProgress += delta * animSpeed * simSpeed;
@@ -1325,6 +1928,7 @@ class Warrior {
         if (this.attackAnimProgress >= 1.0) {
             this.isAttacking = false;
             this.attackCooldown = isShooter ? (isNapoleonicTheme() ? (9.0 + Math.random() * 2.0) : (1.8 + Math.random() * 0.6)) : (0.8 + Math.random() * 0.5);
+            this.stateDirty = true; // --- EVENTO: terminou o ataque ---
 
             if (this.target && !this.target.isDead) {
                 if (!isShooter) {
@@ -1335,7 +1939,7 @@ class Warrior {
                     createSparks(this.target);
                     playClangSound(dmg / 30);
                 } else {
-                    const spawnPos = new THREE.Vector3(this.x, this.y + 0.8, this.z);
+                    const spawnPos = _spawnPosCache.set(this.x, this.y + 0.8, this.z);
                     const damage = isNapoleonicTheme() ? (35 + Math.floor(Math.random() * 15)) : (12 + Math.floor(Math.random() * 8));
                     
                     let wasTreeDefended = false;
@@ -1360,44 +1964,91 @@ class Warrior {
                 }
             }
         }
+        if (window.CombatProfiler) window.CombatProfiler.end('animação de ataque');
     }
     applyPoseToDummy(dummy) {
-        const lodPrimitive = dummy.getObjectByName("lodPrimitive");
-        if (this.lodLevel > 0) {
-            if (lodPrimitive) lodPrimitive.visible = true;
-            for (let i = 0; i < dummy.children.length; i++) {
-                if (dummy.children[i] !== lodPrimitive) dummy.children[i].visible = false;
+        if (dummy === this.dummy) {
+            this.cacheDummyParts();
+        }
+
+        if (window.PerformanceProfiler) window.PerformanceProfiler.start('lod_render');
+        const lodPrimitive = (dummy === this.dummy) ? this._cachedLodPrimitive : dummy.getObjectByName("lodPrimitive");
+        if (this.lodLevel === 2) {
+            if (lodPrimitive) {
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('visibilidade');
+                lodPrimitive.visible = true;
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('visibilidade');
             }
+            for (let i = 0; i < dummy.children.length; i++) {
+                if (dummy.children[i] !== lodPrimitive) {
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('visibilidade');
+                    dummy.children[i].visible = false;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('visibilidade');
+                }
+            }
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('lod_render');
             return;
         }
 
-        if (lodPrimitive) lodPrimitive.visible = false;
+        if (lodPrimitive) {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('visibilidade');
+            lodPrimitive.visible = false;
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('visibilidade');
+        }
         for (let i = 0; i < dummy.children.length; i++) {
-            if (dummy.children[i] !== lodPrimitive) dummy.children[i].visible = true;
+            if (dummy.children[i] !== lodPrimitive) {
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('visibilidade');
+                dummy.children[i].visible = true;
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('visibilidade');
+            }
+        }
+        if (window.PerformanceProfiler) window.PerformanceProfiler.end('lod_render');
+
+        const torso = (dummy === this.dummy) ? this._cachedTorso : dummy.getObjectByName("torso");
+        const armL = (dummy === this.dummy) ? this._cachedArmL : dummy.getObjectByName("armL");
+        const armR = (dummy === this.dummy) ? this._cachedArmR : dummy.getObjectByName("armR");
+        const legL = (dummy === this.dummy) ? this._cachedLegL : dummy.getObjectByName("legL");
+        const legR = (dummy === this.dummy) ? this._cachedLegR : dummy.getObjectByName("legR");
+
+        if (this.lodLevel === 1) {
+            if (armL) armL.visible = false;
+            if (armR) armR.visible = false;
+            if (legL) legL.visible = false;
+            if (legR) legR.visible = false;
         }
 
-        const torso = dummy.getObjectByName("torso");
-        const armL = dummy.getObjectByName("armL");
-        const armR = dummy.getObjectByName("armR");
-        const legL = dummy.getObjectByName("legL");
-        const legR = dummy.getObjectByName("legR");
-        const napoleonicGltf = dummy.getObjectByName("napoleonic_gltf");
-        const bowGroup = dummy.getObjectByName("bowGroup");
-        const bowString = dummy.getObjectByName("bowString");
-        const torchGroup = dummy.getObjectByName("torchGroup");
+        const napoleonicGltf = (dummy === this.dummy) ? this._cachedNapoleonicGltf : dummy.getObjectByName("napoleonic_gltf");
+        const bowGroup = (dummy === this.dummy) ? this._cachedBowGroup : dummy.getObjectByName("bowGroup");
+        const bowString = (dummy === this.dummy) ? this._cachedBowString : dummy.getObjectByName("bowString");
+        const torchGroup = (dummy === this.dummy) ? this._cachedTorchGroup : dummy.getObjectByName("torchGroup");
 
         if (torchGroup) {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('tochas');
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('visibilidade');
             torchGroup.visible = (this.isPusher && this.hasTorch);
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('visibilidade');
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('tochas');
         }
         if (bowGroup && (this.isDaggerArcher || (this.isPusher && isNapoleonicTheme()))) {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('visibilidade');
             bowGroup.visible = false;
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('visibilidade');
         }
 
         if (this.isDead) {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
             if (armL) armL.rotation.x = 0;
             if (armR) armR.rotation.x = 0;
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
+
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('pernas');
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
             if (legL) legL.rotation.x = 0;
             if (legR) legR.rotation.x = 0;
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('pernas');
             return;
         }
 
@@ -1406,36 +2057,72 @@ class Warrior {
             if (!isShooter) {
                 const swing = Math.sin(this.attackAnimProgress * Math.PI);
                 if (armR) {
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                     armR.rotation.x = Math.PI / 6 + swing * 1.5;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                     armR.position.z = -swing * 0.4;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
                 }
             } else {
                 const swing = Math.sin(this.attackAnimProgress * Math.PI);
                 if (napoleonicGltf) {
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                     napoleonicGltf.rotation.x = -0.2 - swing * 0.15;
                     napoleonicGltf.rotation.z = swing * 0.05;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                     napoleonicGltf.position.y = 0;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
                 } else if (isNapoleonicTheme()) {
                     if (armL) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                         armL.rotation.set(-1.2, 0.6, 0);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                         armL.position.set(-0.5, 1.275, 0.2);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
                     }
                     if (armR) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                         armR.rotation.set(-1.4, -0.4, 0);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                         armR.position.set(0.5, 1.275, 0.2);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
                     }
                     if (bowGroup) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                         bowGroup.rotation.set(-0.35, -0.6, 0);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                         bowGroup.position.set(0.2, -0.9, -0.3);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
                     }
                 } else {
                     if (armL) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                         armL.rotation.x = -Math.PI / 2;
                         armL.rotation.y = -Math.PI / 6;
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
                     }
                     if (armR) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                         armR.rotation.x = -Math.PI / 2.5;
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                         armR.position.z = swing * 0.45;
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
                     }
                     if (bowString) bowString.scale.z = 1.0 + swing * 3.5;
                 }
@@ -1446,66 +2133,178 @@ class Warrior {
             const swing = Math.sin(animTime) * 0.7 * modifier;
             
             if (napoleonicGltf) {
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                 napoleonicGltf.rotation.z = Math.sin(animTime) * 0.08;
                 napoleonicGltf.rotation.x = -0.12;
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                 napoleonicGltf.position.y = Math.abs(Math.sin(animTime * 2)) * 0.08;
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
             } else {
-                if (legL) legL.rotation.x = swing;
-                if (legR) legR.rotation.x = -swing;
+                if (legL) {
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('pernas');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
+                    legL.rotation.x = swing;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('pernas');
+                }
+                if (legR) {
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('pernas');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
+                    legR.rotation.x = -swing;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('pernas');
+                }
                 if (isNapoleonicTheme()) {
                     if (armL) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                         armL.rotation.set(swing * 0.5, 0, Math.PI / 12);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                         armL.position.set(-0.85, 1.275, 0);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
                     }
                     if (armR) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                         armR.rotation.set(0.43, 0, -0.05);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                         armR.position.set(0.85, 1.275, 0);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
                     }
                     if (bowGroup) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                         bowGroup.rotation.set(-1.55, 0, 0);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                         bowGroup.position.set(0, -0.1, -0.3);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
                     }
                 } else {
-                    if (armL) armL.rotation.x = -swing * 0.5;
-                    if (armR) armR.rotation.x = swing * 0.5;
+                    if (armL) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
+                        armL.rotation.x = -swing * 0.5;
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
+                    }
+                    if (armR) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
+                        armR.rotation.x = swing * 0.5;
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
+                    }
                 }
                 if (torso) {
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                     torso.position.y = isNapoleonicTheme() ? 0.525 + Math.abs(Math.sin(animTime * 2)) * 0.15 : Math.abs(Math.sin(animTime * 2)) * 0.15;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
                 }
             }
         } else {
             const animTime = this.animTime || 0;
             if (napoleonicGltf) {
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                 napoleonicGltf.rotation.z = Math.sin(animTime * 0.3) * 0.015;
                 napoleonicGltf.rotation.x = 0;
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                 napoleonicGltf.position.y = 0;
+                if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
             } else {
-                if (legL) legL.rotation.x = 0;
-                if (legR) legR.rotation.x = 0;
-                if (torso) torso.position.y = isNapoleonicTheme() ? 0.525 : 0;
+                if (legL) {
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('pernas');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
+                    legL.rotation.x = 0;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('pernas');
+                }
+                if (legR) {
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('pernas');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
+                    legR.rotation.x = 0;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('pernas');
+                }
+                if (torso) {
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
+                    torso.position.y = isNapoleonicTheme() ? 0.525 : 0;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
+                }
                 
                 if (isNapoleonicTheme()) {
                     if (armL) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                         armL.rotation.set(0, 0, Math.PI / 12);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                         armL.position.set(-0.85, 1.275, 0);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
                     }
                     if (armR) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                         armR.rotation.set(0.43, 0, -0.05);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                         armR.position.set(0.85, 1.275, 0);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
                     }
                     if (bowGroup) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                         bowGroup.rotation.set(-1.55, 0, 0);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                         bowGroup.position.set(0, -0.1, -0.3);
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
                     }
                 } else {
                     const breathing = Math.sin(animTime * 0.2) * 0.1;
-                    if (armL) armL.rotation.z = -breathing;
-                    if (armR) armR.rotation.z = breathing;
+                    if (armL) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
+                        armL.rotation.z = -breathing;
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
+                    }
+                    if (armR) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
+                        armR.rotation.z = breathing;
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
+                    }
                     
-                    if (armR) armR.position.z = 0;
-                    if (armR) armR.rotation.x = 0;
-                    if (armL) armL.rotation.x = 0;
-                    if (armL) armL.rotation.y = 0;
+                    if (armR) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
+                        armR.position.z = 0;
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
+                    }
+                    if (armR) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
+                        armR.rotation.x = 0;
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
+                    }
+                    if (armL) {
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('bracos');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
+                        armL.rotation.x = 0;
+                        armL.rotation.y = 0;
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
+                        if (window.PerformanceProfiler) window.PerformanceProfiler.end('bracos');
+                    }
                     if (bowString) bowString.scale.z = 1.0;
                 }
             }

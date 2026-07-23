@@ -61,8 +61,8 @@ function resolveLogCollisions(warrior) {
                 p.x += (dx / dist) * overlap;
                 p.z += (dz / dist) * overlap;
             } else {
-                p.x += (Math.random() - 0.5) * 0.15;
-                p.z += (Math.random() - 0.5) * 0.15;
+                p.x += (fastRandom() - 0.5) * 0.15;
+                p.z += (fastRandom() - 0.5) * 0.15;
             }
         }
     }
@@ -113,8 +113,8 @@ function resolveLogCollisions(warrior) {
                             p.x += (dx / dist) * overlap;
                             p.z += (dz / dist) * overlap;
                         } else {
-                            p.x += (Math.random() - 0.5) * 0.15;
-                            p.z += (Math.random() - 0.5) * 0.15;
+                            p.x += (fastRandom() - 0.5) * 0.15;
+                            p.z += (fastRandom() - 0.5) * 0.15;
                         }
                     }
                 }
@@ -399,7 +399,7 @@ function resolveWarriorCollisions() {
     for (let i = 0; i < catapults.length; i++) {
         const c = catapults[i];
         if (c.isDead) continue;
-        const opp = armies[c.faction].enemies;
+        const opp = window.armies[c.faction].enemies;
         catapultHasTarget.set(c, c.hasEnemyInRange(opp));
     }
 
@@ -438,6 +438,10 @@ function resolveWarriorCollisions() {
 
             for (let i = 0; i < cellLen; i++) {
                 const w1 = cellWarriors[i];
+                if (w1.currentState === 'WAITING') {
+                    if (window.blockStats) window.blockStats.avoidedCalcs++;
+                    // continue; // Removed to fix collision phasing
+                }
                 if (w1.lodLevel >= 2) continue; // Pula colisão rígida para unidades muito distantes
                 if (w1.isPusher && w1.catapult && !w1.catapult.isDead && !catapultHasTarget.get(w1.catapult)) continue;
 
@@ -452,7 +456,6 @@ function resolveWarriorCollisions() {
                     if (w2.lodLevel >= 2) continue; // Pula colisão rígida para unidades muito distantes
                     if (w2.isPusher && w2.catapult && !w2.catapult.isDead && !catapultHasTarget.get(w2.catapult)) continue;
 
-                    // Limita o número de vizinhos processados por guerreiro para evitar explosão quadrática em grandes aglomerações
                     checkedCount++;
                     if (checkedCount > 5) break;
 
