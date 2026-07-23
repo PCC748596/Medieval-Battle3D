@@ -62,6 +62,15 @@ const HUD = {
         this.updateArmy('goblins', goblinsCount);
     },
 
+    updateAIStatus(faction, genState, brigState, formState) {
+        const elGen = document.getElementById(`ai-gen-${faction}`);
+        const elBrig = document.getElementById(`ai-brig-${faction}`);
+        const elForm = document.getElementById(`ai-form-${faction}`);
+        if (elGen) elGen.innerText = genState;
+        if (elBrig) elBrig.innerText = brigState;
+        if (elForm) elForm.innerText = formState;
+    },
+
     updatePause(isPaused) {
         if (!this.elements.btnPause) return;
         if (isPaused) {

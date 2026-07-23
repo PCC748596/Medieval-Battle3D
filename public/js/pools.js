@@ -36,10 +36,10 @@ const geomEye = new THREE.BoxGeometry(0.12, 0.12, 0.12);
 const eyeMat = new THREE.MeshBasicMaterial({ color: 0x0a0a0a });
 const geomEar = new THREE.ConeGeometry(0.12, 0.45, 4);
 
-const geomArrowShaft = new THREE.CylinderGeometry(0.035, 0.035, 1.1, 4);
-const geomArrowTip = new THREE.ConeGeometry(0.07, 0.22, 4);
-const matArrowShaft = new THREE.MeshBasicMaterial({ color: 0xffffff });
-const matArrowTip = new THREE.MeshLambertMaterial({ color: 0x9e9e9e });
+const geomArrowShaft = new THREE.CylinderGeometry(0.06, 0.06, 1.4, 4);
+const geomArrowTip = new THREE.ConeGeometry(0.1, 0.3, 4);
+const matArrowShaft = new THREE.MeshBasicMaterial({ color: 0x1a0a00 });
+const matArrowTip = new THREE.MeshLambertMaterial({ color: 0x222222 });
 
 const textures = {
     knights: {
@@ -75,17 +75,4 @@ const templateMeshes = {
     goblins: { melee: null, archer: null }
 };
 
-let napoleonicSoldierGLTF = null;
-const gltfLoader = new THREE.GLTFLoader();
-gltfLoader.load('assets/Toy_Soldier_0720141626_texture.glb', (gltf) => {
-    napoleonicSoldierGLTF = gltf.scene;
-    napoleonicSoldierGLTF.traverse(child => {
-        if (child.isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-        }
-    });
-}, undefined, (err) => {
-    console.warn('Modelo 3D do soldado napoleónico não encontrado, usando fallback geométrico.');
-});
 // HUD.js - Módulo de interface de usuário

@@ -65,7 +65,10 @@ class Arrow {
 
         this.startPos.copy(spawnPos);
         if (target) {
-            this.targetPos.set(target.x, target.y, target.z);
+            const tx = target.x !== undefined ? target.x : (target.mesh ? target.mesh.position.x : 0);
+            const ty = target.y !== undefined ? target.y : (target.mesh ? target.mesh.position.y : 0);
+            const tz = target.z !== undefined ? target.z : (target.mesh ? target.mesh.position.z : 0);
+            this.targetPos.set(tx, ty, tz);
         } else {
             this.targetPos.copy(spawnPos);
         }
@@ -166,7 +169,10 @@ class Arrow {
             this.isDead = true;
 
             if (this.target && !this.target.isDead) {
-                const currentTargetPos = _currentTargetPosCache.set(this.target.x, this.target.y, this.target.z);
+                const tx = this.target.x !== undefined ? this.target.x : (this.target.mesh ? this.target.mesh.position.x : 0);
+                const ty = this.target.y !== undefined ? this.target.y : (this.target.mesh ? this.target.mesh.position.y : 0);
+                const tz = this.target.z !== undefined ? this.target.z : (this.target.mesh ? this.target.mesh.position.z : 0);
+                const currentTargetPos = _currentTargetPosCache.set(tx, ty, tz);
                 currentTargetPos.y += 0.3;
                 const distToTarget = this.mesh.position.distanceTo(currentTargetPos);
                 const hitRadius = (this.target.constructor.name === 'Catapult') ? 4.0 : 1.4;

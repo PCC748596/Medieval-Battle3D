@@ -324,7 +324,7 @@ window.findNearestEnemyInGrid = function(warrior) {
     let bestDistSq = Infinity;
 
     // Busca em anéis concêntricos ao redor da unidade
-    const maxRing = 8; // Máximo de 8 células de distância (~40 metros de detecção rápida)
+    const maxRing = 20; // Máximo de 20 células de distância (~100 metros) para tropas que recuaram acharem o combate
     for (let ring = 0; ring <= maxRing; ring++) {
         let foundInRing = false;
 
@@ -457,7 +457,7 @@ function resolveWarriorCollisions() {
                     if (w2.isPusher && w2.catapult && !w2.catapult.isDead && !catapultHasTarget.get(w2.catapult)) continue;
 
                     checkedCount++;
-                    if (checkedCount > 5) break;
+                    if (checkedCount > 12) break;
 
                     const p2 = w2;
                     const dx = p2.x - p1.x;
@@ -480,9 +480,9 @@ function resolveWarriorCollisions() {
                             let f2 = 0.5;
 
                             if (eng1 && eng2) {
-                                // Ambos lutando: sem empurrão mútuo para manter as fileiras perfeitamente paradas e economizar recálculos
-                                f1 = 0.0;
-                                f2 = 0.0;
+                                // Ambos lutando: empurrão leve para manter separação mínima
+                                f1 = 0.3;
+                                f2 = 0.3;
                             } else if (eng1) {
                                 // w1 está lutando (âncora estática), w2 está se movendo/procurando (absorve 100% do empurrão para desviar)
                                 f1 = 0.0;
@@ -494,8 +494,14 @@ function resolveWarriorCollisions() {
                             }
 
                             if (f1 > 0 || f2 > 0) {
-                                const pushX = (dx / distance) * overlap;
-                                const pushZ = (dz / distance) * overlap;
+                                let shockMultiplier = 1.0;
+                                // Se forem de facções diferentes, o choque é mais forte (impacto da carga/empurrão de formações)
+                                if (w1.faction !== w2.faction) {
+                                    shockMultiplier = 1.8;
+                                }
+
+                                const pushX = (dx / distance) * overlap * shockMultiplier;
+                                const pushZ = (dz / distance) * overlap * shockMultiplier;
 
                                 if (f1 > 0) {
                                     p1.x -= pushX * f1;

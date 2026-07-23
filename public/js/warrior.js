@@ -2,6 +2,14 @@
 let warriorUidCounter = 0;
 const _spawnPosCache = new THREE.Vector3();
 
+function getTargetX(t) { return t ? (t.x !== undefined ? t.x : (t.mesh ? t.mesh.position.x : 0)) : 0; }
+function getTargetY(t) { return t ? (t.y !== undefined ? t.y : (t.mesh ? t.mesh.position.y : 0)) : 0; }
+function getTargetZ(t) { return t ? (t.z !== undefined ? t.z : (t.mesh ? t.mesh.position.z : 0)) : 0; }
+function getTargetPos(t, out = new THREE.Vector3()) {
+    if (!t) return out.set(0, 0, 0);
+    return out.set(getTargetX(t), getTargetY(t), getTargetZ(t));
+}
+
 function mergeGeometries(geos) {
     let totalVertices = 0;
     const preparedGeos = geos.map(g => {
@@ -137,7 +145,7 @@ class Warrior {
         this.speed = (baseSpeed + Math.random() * 0.02) * 60;
 
         this.attackRange = isNapoleonicTheme() ? 100.0 : (((role === 'melee' || this.isDaggerArcher)) ? 2.8 : 100.0);
-        this.keepDistanceRange = ((role === 'melee' || this.isDaggerArcher)) ? 0 : 50.0;
+        this.keepDistanceRange = 0; // Archers will stand their ground and shoot point-blank instead of running away
         this.attackCooldown = 0;
         this.isDead = false;
         this.target = null;
@@ -160,7 +168,7 @@ class Warrior {
         this.lastTargetAngle = 0;
         this.isKiting = false;
 
-        this.morale = 6 + Math.floor(Math.random() * 5); // 6 to 10
+        this.morale = 50 + Math.floor(Math.random() * 21); // 50 to 70
         this.isFleeing = false;
         this.fleeStartX = 0;
         this.fleeStartZ = 0;
@@ -175,6 +183,9 @@ class Warrior {
         this.isTryingToMove = false;
         this.attackerCount = 0;
         this.lodLevel = 0;
+
+        this.fatigue = 100;
+        this.formationTarget = null;
 
         this.assembleBody();
 
@@ -833,8 +844,8 @@ class Warrior {
                         const ally = cell[i];
                         if (ally === this || ally.isDead || ally.faction !== this.faction) continue;
                         
-                        // Verifica se o aliado está parado ou engajado
-                        const isAllyEngaged = (ally.role === 'melee' && ally.target && !ally.target.isDead && (ally.lastVelocity.lengthSq() < 0.1 || ally.isAttacking)) || ally.currentState === 'WAITING';
+                        // Verifica se o aliado está parado ou engajado (não bloqueia cascata de WAITING)
+                        const isAllyEngaged = (ally.role === 'melee' && ally.target && !ally.target.isDead && (ally.lastVelocity.lengthSq() < 0.1 || ally.isAttacking));
                         if (!isAllyEngaged) continue;
                         
                         const dx = px - ally.x;
@@ -1071,10 +1082,9 @@ class Warrior {
 
         // 7. Matrix
         const isMoving = this.lastVelocity && this.lastVelocity.lengthSq() > 0.0001;
-        const animActive = !this.isDead && (this.isAttacking || isMoving || this.animTime !== this._lastAnimTime);
         this._lastAnimTime = this.animTime;
 
-        if (this.positionDirty || this.rotationDirty || this.lodDirty || scaleChanged || animActive) {
+        if (this.positionDirty || this.rotationDirty || this.lodDirty || scaleChanged) {
             this.matrixDirty = true;
         }
     }
@@ -1139,6 +1149,10 @@ class Warrior {
         if (this.attackCooldown > 0) {
             if (window.CombatProfiler) window.CombatProfiler.start('cooldown');
             this.attackCooldown -= delta * simSpeed;
+            if (this.attackCooldown <= 0) {
+                this.attackCooldown = 0;
+                this.stateDirty = true; // Trigger heavy AI to attack again!
+            }
             if (window.CombatProfiler) window.CombatProfiler.end('cooldown');
         }
 
@@ -1161,7 +1175,7 @@ class Warrior {
             }
         }
 
-        if (this.morale <= 4 && !this.isFleeing && !this.isPusher) {
+        if (this.morale <= 20 && !this.isFleeing && !this.isPusher) {
             this.isFleeing = true;
             this.hasRetreated50m = false;
             this.fleeStartX = this.x;
@@ -1174,7 +1188,16 @@ class Warrior {
             if (!this.hasRetreated50m) {
                 const dx = this.x - this.fleeStartX;
                 const dz = this.z - this.fleeStartZ;
-                if (dx * dx + dz * dz >= 2500) {
+                let hitWall = false;
+                if (window.CONFIG) {
+                    const limitX = (CONFIG.arenaWidth || 1000) / 2 - 2;
+                    const limitZ = (CONFIG.arenaDepth || 1000) / 2 - 2;
+                    if (this.x <= -limitX || this.x >= limitX || this.z <= -limitZ || this.z >= limitZ) {
+                        hitWall = true;
+                    }
+                }
+
+                if (dx * dx + dz * dz >= 625 || hitWall) { // 25 metros ou limite do mapa
                     this.hasRetreated50m = true;
                     this.fleeTimer = 0;
                     this.lastVelocity.set(0, 0, 0);
@@ -1193,12 +1216,12 @@ class Warrior {
                 this.lastVelocity.set(0, 0, 0);
                 this.isTryingToMove = false;
                 this.fleeTimer += delta * simSpeed;
-                if (this.fleeTimer >= 10.0) {
-                    this.morale++;
+                // Rally back into battle faster instead of standing paralyzed for 200 seconds!
+                if (this.fleeTimer >= 2.0) {
+                    this.morale = 60;
+                    this.isFleeing = false;
                     this.fleeTimer = 0;
-                    if (this.morale >= 7) {
-                        this.isFleeing = false;
-                    }
+                    this.stateDirty = true;
                 }
             }
         } else {
@@ -1209,6 +1232,13 @@ class Warrior {
             if (isHeavyFrame) {
                 this.updateHeavyAIAndPhysics(opponents, delta, simSpeed);
             }
+        }
+
+        // Lógica de fadiga
+        if (this.isTryingToMove || this.isAttacking) {
+            this.fatigue = Math.max(0, this.fatigue - delta * simSpeed * 0.5);
+        } else {
+            this.fatigue = Math.min(100, this.fatigue + delta * simSpeed * 1.5);
         }
 
         // --- APLICAÇÃO DO MOVIMENTO ---
@@ -1223,8 +1253,9 @@ class Warrior {
             }
             if (window.CombatProfiler) window.CombatProfiler.end('knockback');
         } else {
-            this.x += this.lastVelocity.x * delta * simSpeed * terrainSpeed;
-            this.z += this.lastVelocity.z * delta * simSpeed * terrainSpeed;
+            const fatigueSpeedMultiplier = this.fatigue > 30 ? 1.0 : (this.fatigue > 0 ? 0.7 : 0.4);
+            this.x += this.lastVelocity.x * delta * simSpeed * terrainSpeed * fatigueSpeedMultiplier;
+            this.z += this.lastVelocity.z * delta * simSpeed * terrainSpeed * fatigueSpeedMultiplier;
 
             if (this.lastVelocity.lengthSq() > 0.0001) {
                 if (this.lodLevel === 0) {
@@ -1380,7 +1411,26 @@ class Warrior {
                 return;
             }
 
-            if (this.isFlanker) {
+            if (this.formationTarget) {
+                this.currentState = 'ADVANCING';
+                const dx = this.formationTarget.x - this.x;
+                const dz = this.formationTarget.z - this.z;
+                const distSq = dx * dx + dz * dz;
+                
+                if (distSq > 1.0) {
+                    let moveDir = _tmpVec3A.set(dx, 0, dz).normalize();
+                    const moveSpeed = this.speed * (this.fatigue > 30 ? 1.0 : (this.fatigue > 0 ? 0.7 : 0.4));
+                    this.lastVelocity.set(moveDir.x * moveSpeed, 0, moveDir.z * moveSpeed);
+                    this.lastTargetAngle = Math.atan2(dx, dz) + Math.PI;
+                    this.isTryingToMove = true;
+                } else {
+                    this.lastVelocity.set(0, 0, 0);
+                    this.isTryingToMove = false;
+                    if (this.formationTarget.rotY !== undefined) {
+                        this.lastTargetAngle = this.formationTarget.rotY;
+                    }
+                }
+            } else if (this.isFlanker) {
                 this.currentState = 'FLANKING';
                 const dirX = window.armies[this.faction].dirX;
                 const flankDirZ = (this.uid % 2 === 0) ? 1.0 : -1.0;
@@ -1398,8 +1448,26 @@ class Warrior {
         }
 
         // Temos alvo vivo e válido!
-        const dx = this.target.x - this.x;
-        const dz = this.target.z - this.z;
+        // Checagem de proximidade imediata: se houver um inimigo MUITO MAIS PRÓXIMO na frente (< 6m) do que o nosso alvo atual (> 10m), troca para ele imediatamente!
+        if (window.findNearestEnemyInGrid && (this.role === 'melee' || this.isDaggerArcher)) {
+            const closeEnemy = window.findNearestEnemyInGrid(this);
+            if (closeEnemy && closeEnemy !== this.target) {
+                const cdx = getTargetX(closeEnemy) - this.x;
+                const cdz = getTargetZ(closeEnemy) - this.z;
+                const cDistSq = cdx * cdx + cdz * cdz;
+                const curDx = getTargetX(this.target) - this.x;
+                const curDz = getTargetZ(this.target) - this.z;
+                const curDistSq = curDx * curDx + curDz * curDz;
+                if (cDistSq < 36 && curDistSq > 100) { // Inimigo próximo a <6m e alvo atual a >10m
+                    this.target = closeEnemy;
+                    this.stateDirty = true;
+                    return;
+                }
+            }
+        }
+
+        const dx = getTargetX(this.target) - this.x;
+        const dz = getTargetZ(this.target) - this.z;
         const distSq = dx * dx + dz * dz;
 
         const targetRadius = this.target.radius || 0.8;
@@ -1552,8 +1620,8 @@ class Warrior {
 
         if (hasValidTarget) {
             if (window.CombatProfiler) window.CombatProfiler.start('cálculo de distância');
-            const dx = this.target.x - this.x;
-            const dz = this.target.z - this.z;
+            const dx = getTargetX(this.target) - this.x;
+            const dz = getTargetZ(this.target) - this.z;
             const distSq = dx * dx + dz * dz;
             if (window.CombatProfiler) window.CombatProfiler.end('cálculo de distância');
 
@@ -1596,7 +1664,26 @@ class Warrior {
             // Se o alvo morreu ou se não tem alvo, avance na direção inimiga base da facção
             this.target = null;
             this.isAttacking = false;
-            if (this.isFlanker) {
+            if (this.formationTarget) {
+                this.currentState = 'ADVANCING';
+                const dx = this.formationTarget.x - this.x;
+                const dz = this.formationTarget.z - this.z;
+                const distSq = dx * dx + dz * dz;
+                
+                if (distSq > 1.0) {
+                    let moveDir = _tmpVec3A.set(dx, 0, dz).normalize();
+                    const moveSpeed = this.speed * (this.fatigue > 30 ? 1.0 : (this.fatigue > 0 ? 0.7 : 0.4));
+                    this.lastVelocity.set(moveDir.x * moveSpeed, 0, moveDir.z * moveSpeed);
+                    this.lastTargetAngle = Math.atan2(dx, dz) + Math.PI;
+                    this.isTryingToMove = true;
+                } else {
+                    this.lastVelocity.set(0, 0, 0);
+                    this.isTryingToMove = false;
+                    if (this.formationTarget.rotY !== undefined) {
+                        this.lastTargetAngle = this.formationTarget.rotY;
+                    }
+                }
+            } else if (this.isFlanker) {
                 this.currentState = 'FLANKING';
                 const dirX = window.armies[this.faction].dirX;
                 const flankDirZ = (this.uid % 2 === 0) ? 1.0 : -1.0;
@@ -1626,8 +1713,8 @@ class Warrior {
 
         if ((this.role === 'melee' || this.isDaggerArcher) && hasTarget) {
             if (window.CombatProfiler) window.CombatProfiler.start('cálculo de distância');
-            const dx = this.target.x - this.x;
-            const dz = this.target.z - this.z;
+            const dx = getTargetX(this.target) - this.x;
+            const dz = getTargetZ(this.target) - this.z;
             const distSq = dx * dx + dz * dz;
             if (window.CombatProfiler) window.CombatProfiler.end('cálculo de distância');
 
@@ -1656,24 +1743,17 @@ class Warrior {
             }
 
             // 2. Se não encontrar nenhum inimigo próximo no Grid (armadas distantes no início),
-            // escolhe um oponente vivo aleatório para marchar na direção dele.
+            // escolhe o oponente vivo no MESMO CORREDOR (mesmo eixo Z) para marchar em linha reta paralela!
             if (!bestTarget && opponents.length > 0) {
+                let minZDiff = Infinity;
                 if (window.CombatProfiler) window.CombatProfiler.start('qualquer loop sobre inimigos');
-                for (let attempt = 0; attempt < 5; attempt++) {
-                    const idx = Math.floor(Math.random() * opponents.length);
-                    const enemy = opponents[idx];
+                for (let i = 0; i < opponents.length; i++) {
+                    const enemy = opponents[i];
                     if (enemy && !enemy.isDead) {
-                        bestTarget = enemy;
-                        break;
-                    }
-                }
-                // Fallback seguro se as tentativas aleatórias não acharem ninguém vivo
-                if (!bestTarget) {
-                    for (let i = 0; i < opponents.length; i++) {
-                        const enemy = opponents[i];
-                        if (enemy && !enemy.isDead) {
+                        const zDiff = Math.abs(enemy.z - this.z);
+                        if (zDiff < minZDiff) {
+                            minZDiff = zDiff;
                             bestTarget = enemy;
-                            break;
                         }
                     }
                 }
@@ -1728,7 +1808,8 @@ class Warrior {
             this.lastVelocity.set(0, 0, 0);
             return;
         }
-        let dir = _tmpVec3A.subVectors(this.target, this).normalize();
+        const tPos = getTargetPos(this.target, _tmpVec3B);
+        let dir = _tmpVec3A.subVectors(tPos, this).normalize();
 
         const hash = this.uid;
         // Leve variação para não ficarem milimetricamente colados, mas sem espalhar na largada
@@ -1738,12 +1819,12 @@ class Warrior {
         dir = this.getAvoidanceDir(dir);
         
         if (this._isBlockedByAlly) {
-            if (!this.isFlanker) {
+            if (!this.isFlanker && this.role !== 'archer') {
                 this.currentState = 'WAITING';
                 this.lastVelocity.set(0, 0, 0);
                 this.isTryingToMove = false;
                 return;
-            } else {
+            } else if (this.isFlanker) {
                 this.currentState = 'FLANKING';
             }
         }
@@ -1757,7 +1838,8 @@ class Warrior {
             this.lastVelocity.set(0, 0, 0);
             return;
         }
-        let dir = _tmpVec3A.subVectors(this, this.target).normalize();
+        const tPos = getTargetPos(this.target, _tmpVec3B);
+        let dir = _tmpVec3A.subVectors(this, tPos).normalize();
 
         dir = this.getAvoidanceDir(dir);
 
@@ -1815,6 +1897,11 @@ class Warrior {
             if (this.attackCooldown <= 0 && !this.isAttacking) {
                 this.isAttacking = true;
                 this.attackAnimProgress = 0;
+                if (this.target) {
+                    const tx = this.target.x !== undefined ? this.target.x : (this.target.mesh ? this.target.mesh.position.x : 0);
+                    const tz = this.target.z !== undefined ? this.target.z : (this.target.mesh ? this.target.mesh.position.z : 0);
+                    this.lastTargetAngle = Math.atan2(tx - this.x, tz - this.z) + Math.PI;
+                }
             }
         }
         if (window.CombatProfiler) window.CombatProfiler.end('ataque');
@@ -1897,6 +1984,7 @@ class Warrior {
             const dz = ally.z - this.z;
             if (dx * dx + dz * dz < 15 * 15) { // raio de 15 metros
                 ally.stateDirty = true;
+                ally.morale = Math.max(1, ally.morale - 0.5); // Reduzido penalty de 2 para 0.5 para evitar flee instantaneo da linha de frente inteira
             }
         }
 
@@ -1935,7 +2023,7 @@ class Warrior {
                     const isDagger = this.isDaggerArcher;
                     const dmg = isDagger ? (22 + Math.floor(Math.random() * 18)) : (15 + Math.floor(Math.random() * 15));
                     this.target.takeDamage(dmg, this);
-                    this.morale = Math.min(10, this.morale + 1);
+                    this.morale = Math.min(70, this.morale + 1);
                     createSparks(this.target);
                     playClangSound(dmg / 30);
                 } else {

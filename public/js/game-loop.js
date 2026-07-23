@@ -543,6 +543,12 @@ function animate() {
             if (window.CombatProfiler) window.CombatProfiler.end('atualização da Spatial Grid');
         }
 
+        if (window.AICommanderSystem) {
+            if (window.PerformanceProfiler) window.PerformanceProfiler.start('ai_commander');
+            window.AICommanderSystem.update(now);
+            if (window.PerformanceProfiler) window.PerformanceProfiler.end('ai_commander');
+        }
+
         for (let i = knights.length - 1; i >= 0; i--) {
             if (window.PerformanceProfiler) window.PerformanceProfiler.start('lod');
             knights[i].updateLOD(cameraPos, maxDistSq, medDistSq);

@@ -50,6 +50,7 @@ const PerformanceProfiler = {
         projeteis: "Projéteis",
         colisoes: "Colisões",
         spatial_grid: "Spatial Grid",
+        ai_commander: "AI Commander",
         lod: "LOD",
         animacoes: "Animações",
         matrizes_instancedmesh: "Atualização das matrizes dos InstancedMesh",
@@ -127,8 +128,14 @@ const PerformanceProfiler = {
             const start = this.startTimes[parentKey];
             if (start !== undefined) {
                 const elapsed = now - start;
+                if (!this.stats[parentKey]) {
+                    this.stats[parentKey] = { accumulatedTime: 0, currentCallCount: 0, minTime: Infinity, maxTime: 0, totalTimeSum: 0, totalCalls: 0, history: [] };
+                }
                 this.stats[parentKey].accumulatedTime += elapsed;
             }
+        }
+        if (!this.stats[key]) {
+            this.stats[key] = { accumulatedTime: 0, currentCallCount: 0, minTime: Infinity, maxTime: 0, totalTimeSum: 0, totalCalls: 0, history: [] };
         }
         activeStack.push(key);
         this.startTimes[key] = now;
@@ -151,6 +158,9 @@ const PerformanceProfiler = {
             if (popped) {
                 const start = this.startTimes[popped];
                 if (start !== undefined) {
+                    if (!this.stats[popped]) {
+                        this.stats[popped] = { accumulatedTime: 0, currentCallCount: 0, minTime: Infinity, maxTime: 0, totalTimeSum: 0, totalCalls: 0, history: [] };
+                    }
                     this.stats[popped].accumulatedTime += (now - start);
                     this.stats[popped].currentCallCount += 1;
                 }
@@ -160,6 +170,9 @@ const PerformanceProfiler = {
         const start = this.startTimes[key];
         if (start !== undefined) {
             const elapsed = now - start;
+            if (!this.stats[key]) {
+                this.stats[key] = { accumulatedTime: 0, currentCallCount: 0, minTime: Infinity, maxTime: 0, totalTimeSum: 0, totalCalls: 0, history: [] };
+            }
             this.stats[key].accumulatedTime += elapsed;
             this.stats[key].currentCallCount += 1;
         }
@@ -472,9 +485,9 @@ window.PerformanceProfiler = PerformanceProfiler;
 PerformanceProfiler.init();
 
 // --- CONSTANTES GLOBAIS DE DIMENSÃO DA ARENA ---
-let sizeX = 1000;
-let sizeZ = 500;
-let lodEnabled = true;
+let sizeX = 500;
+let sizeZ = 250;
+let lodEnabled = false;
 let currentTheme = 'medieval';
 
 // --- TABELA DE LOOKUP PARA NÚMEROS ALEATÓRIOS ULTRA RÁPIDA (REDUZ LIXO E CHAMADAS DE CPU) ---
@@ -499,14 +512,14 @@ let totalDeadGoblins = 0;
 let cameraMode = 'orbit';
 let cinematicTime = 0;
 let cinematicZoomPauseTimer = 0;
-let archerRatio = 0.3;
-let flankRatio = 0.15;
-let numCloudsSetting = 200;
+let archerRatio = 0.2;
+let flankRatio = 0.35;
+let numCloudsSetting = 0;
 window.panelVisible = true;
 let lightningTimer = 0;
 let nextLightningTime = 0;
 let flashCountdown = 0;
-function isNapoleonicTheme() { return currentTheme === 'napoleonic' || currentTheme === 'napoleonic_3d'; }
+function isNapoleonicTheme() { return false; }
 
 // Guarda as coordenadas de todas as árvores ativas para verificar a proximidade de cobertura
 const treePositions = [];
@@ -645,8 +658,23 @@ const CONFIG = {
     CAMERA_PHI: 0.1,
     CAMERA_RADIUS_RATIO: 0.8,
 
-    // AI
-    // Placeholder para constantes futuras
+    // AI - Layers Update Frequencies (ms)
+    AI_GENERAL_UPDATE_MS: 3000,
+    AI_BRIGADA_UPDATE_MS: 1000,
+    AI_FORMACAO_UPDATE_MS: 200,
+    AI_SOLDADO_UPDATE_MS: 100,
+
+    // AI - Morale and Fatigue Thresholds
+    MORALE_FLEE_THRESHOLD: 20,
+    FATIGUE_DEBUFF_THRESHOLD: 30,
+    
+    // AI - Base Stats
+    STATS: {
+        CAVALRY: { mass: 10, speed: 12, range: 4, charge_bonus: 20 },
+        INFANTRY: { mass: 3, speed: 4, range: 2, charge_bonus: 2 },
+        SPEARMAN: { mass: 5, speed: 3, range: 6, charge_bonus: 1 },
+        ARCHER: { mass: 2, speed: 5, range: 100, charge_bonus: 0 }
+    },
 
     // Animation
     // Placeholder para constantes futuras

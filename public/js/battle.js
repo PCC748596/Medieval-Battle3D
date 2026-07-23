@@ -294,6 +294,13 @@ function clearUnits() {
     battleManager.setKills(0);
     totalDeadKnights = 0;
     totalDeadGoblins = 0;
+    
+    // Clear AI Commander data
+    if (window.AICommanderSystem) {
+        window.AICommanderSystem.knightGeneral.brigades = [];
+        window.AICommanderSystem.goblinGeneral.brigades = [];
+    }
+
     battleManager.setBattleEnded(false);
     HUD.hideBattleEndModal();
     HUD.updateKills(0);
@@ -576,7 +583,13 @@ function createGroups(numMelee, sizeZ, maxZRatio, baseGroupSpacing) {
     return { G, groupSpacingZ };
 }
 
-function spawnFormation(faction, role, count, startX, dir, startXOffset, zBase, colsPerBlock, spacingX, spacingZ) {
+function spawnFormation(faction, role, count, startX, dir, startXOffset, zBase, colsPerBlock, spacingX, spacingZ, aiBrigade) {
+    let aiFormation = null;
+    if (aiBrigade) {
+        aiFormation = aiBrigade.createFormation();
+        aiFormation.type = role === 'archer' ? 'line' : 'block';
+    }
+
     let depth = 0;
     const formationStartX = startX + dir * startXOffset;
     for (let i = 0; i < count; i++) {
@@ -588,17 +601,20 @@ function spawnFormation(faction, role, count, startX, dir, startXOffset, zBase, 
         const z = zBase + (col - (colsPerBlock - 1) / 2) * spacingZ;
         
         const w = new Warrior(faction, role, x, z);
+        if (aiFormation) {
+            aiFormation.addSoldier(w);
+        }
         window.armies[faction].list.push(w);
     }
     return depth;
 }
 
-function spawnMelee(faction, count, startX, dir, zBase, colsPerBlock, spacingX, spacingZ) {
-    return spawnFormation(faction, 'melee', count, startX, dir, 0, zBase, colsPerBlock, spacingX, spacingZ);
+function spawnMelee(faction, count, startX, dir, zBase, colsPerBlock, spacingX, spacingZ, aiBrigade) {
+    return spawnFormation(faction, 'melee', count, startX, dir, 0, zBase, colsPerBlock, spacingX, spacingZ, aiBrigade);
 }
 
-function spawnArchers(faction, count, startX, dir, zBase, archerStartXOffset, colsPerBlock, spacingX, spacingZ) {
-    return spawnFormation(faction, 'archer', count, startX, dir, archerStartXOffset, zBase, colsPerBlock, spacingX, spacingZ);
+function spawnArchers(faction, count, startX, dir, zBase, archerStartXOffset, colsPerBlock, spacingX, spacingZ, aiBrigade) {
+    return spawnFormation(faction, 'archer', count, startX, dir, archerStartXOffset, zBase, colsPerBlock, spacingX, spacingZ, aiBrigade);
 }
 
 function registerGroups(faction, groups) {
@@ -628,10 +644,16 @@ function spawnUnits(faction, quantity) {
         const countArchers = Math.floor(numArchers / G) + (g < numArchers % G ? 1 : 0);
         const zBase = (g - (G - 1) / 2) * groupSpacingZ;
 
-        const meleeDepth = spawnMelee(faction, countMelee, startX, dir, zBase, colsPerBlock, spacingX, spacingZ);
+        let aiBrigade = null;
+        if (window.AICommanderSystem) {
+            const general = window.AICommanderSystem[faction === 'knights' ? 'knightGeneral' : 'goblinGeneral'];
+            aiBrigade = general.createBrigade(`${faction}-brig-${g}`, 'MIXED');
+        }
+
+        const meleeDepth = spawnMelee(faction, countMelee, startX, dir, zBase, colsPerBlock, spacingX, spacingZ, aiBrigade);
 
         const archerStartXOffset = meleeDepth * spacingX + CONFIG.UNITS_ARCHER_GAP;
-        const archerDepth = spawnArchers(faction, countArchers, startX, dir, zBase, archerStartXOffset, colsPerBlock, spacingX, spacingZ);
+        const archerDepth = spawnArchers(faction, countArchers, startX, dir, zBase, archerStartXOffset, colsPerBlock, spacingX, spacingZ, aiBrigade);
 
         const groupEndXOffset = archerStartXOffset + archerDepth * spacingX + CONFIG.UNITS_CATAPULT_GAP;
         groups.push({
