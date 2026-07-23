@@ -94,5 +94,17 @@ window.playWarCrySound = function () {
 
 window.startContinuousCrowdRoar = function () {};
 window.stopContinuousCrowdRoar = function () {};
-window.startDrumLoop = function () {};
-window.stopDrumLoop = function () {};
+window.startDrumLoop = function () {
+    if (window.PerformanceProfiler) window.PerformanceProfiler.start('sons');
+    if (!soundEnabled) {
+        if (window.PerformanceProfiler) window.PerformanceProfiler.end('sons');
+        return;
+    }
+    bgMusic.play().catch(e => {  });
+    if (window.PerformanceProfiler) window.PerformanceProfiler.end('sons');
+};
+window.stopDrumLoop = function () {
+    if (window.PerformanceProfiler) window.PerformanceProfiler.start('sons');
+    bgMusic.pause();
+    if (window.PerformanceProfiler) window.PerformanceProfiler.end('sons');
+};

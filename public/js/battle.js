@@ -374,6 +374,13 @@ function resetBattle() {
     
     resetCamera();
     playWarCrySound();
+    
+    battleManager.setPause(true);
+    HUD.updatePause(true);
+    if (soundEnabled) {
+        stopDrumLoop();
+        stopContinuousCrowdRoar();
+    }
 }
 window.resetBattle = resetBattle;
 

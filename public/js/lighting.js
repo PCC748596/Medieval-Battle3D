@@ -34,6 +34,7 @@ function setEnvironment(type) {
         dirLight.intensity = 1.2;
         rimLight.color.setHex(0xffffff);
         rimLight.intensity = 0.3;
+        if (typeof matArrowShaft !== 'undefined') matArrowShaft.color.setHex(0x3b2313); // Marrom
     } else if (type === 'sunset') {
         scene.background.setHex(0x381e18);
         scene.fog.color.setHex(0x381e18);
@@ -43,6 +44,7 @@ function setEnvironment(type) {
         dirLight.intensity = 0.8;
         rimLight.color.setHex(0xaa33ff);
         rimLight.intensity = 0.45;
+        if (typeof matArrowShaft !== 'undefined') matArrowShaft.color.setHex(0xffffff); // Branca
     } else if (type === 'noite') {
         scene.background.setHex(0x07090e);
         scene.fog.color.setHex(0x07090e);
@@ -52,6 +54,7 @@ function setEnvironment(type) {
         dirLight.intensity = 0.8;
         rimLight.color.setHex(0xddddff);
         rimLight.intensity = 0.4;
+        if (typeof matArrowShaft !== 'undefined') matArrowShaft.color.setHex(0xffffff); // Branca
     }
 
     // Escurece o ambiente de acordo com a quantidade de nuvens

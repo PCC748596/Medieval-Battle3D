@@ -9,7 +9,7 @@ class BattleManager {
         this.kills = 0;
         this.battleEnded = false;
         this.simulationSpeed = 1.0;
-        this.pause = false;
+        this.pause = true;
         this.activeKnightsCache = [];
         this.activeGoblinsCache = [];
     }
