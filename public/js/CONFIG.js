@@ -560,9 +560,10 @@ function initTerrainHeightCache() {
         const z = terrainCacheMinZ + r * terrainCacheRes;
         for (let c = 0; c < terrainCacheWidth; c++) {
             const x = terrainCacheMinX + c * terrainCacheRes;
-            terrainCache[c + r * terrainCacheWidth] = Math.sin(x * 0.08) * Math.cos(z * 0.08) * 3.2 +
-                Math.sin(x * 0.035) * 1.5 +
-                Math.cos(z * 0.035) * 1.0;
+            // Relevo mais alto (até ~10m) e mais suave (ondas longas de 157m/251m)
+            terrainCache[c + r * terrainCacheWidth] = Math.sin(x * 0.04) * Math.cos(z * 0.04) * 5.0 +
+                Math.sin(x * 0.025) * 3.0 +
+                Math.cos(z * 0.025) * 2.0;
         }
     }
 }
@@ -573,9 +574,9 @@ initTerrainHeightCache();
 function getTerrainHeight(x, z) {
     if (!terrainCache || x < terrainCacheMinX || x > terrainCacheMaxX || z < terrainCacheMinZ || z > terrainCacheMaxZ) {
         // Fallback para cálculo matemático exato se estiver fora dos limites do cache
-        return Math.sin(x * 0.08) * Math.cos(z * 0.08) * 3.2 +
-            Math.sin(x * 0.035) * 1.5 +
-            Math.cos(z * 0.035) * 1.0;
+        return Math.sin(x * 0.04) * Math.cos(z * 0.04) * 5.0 +
+            Math.sin(x * 0.025) * 3.0 +
+            Math.cos(z * 0.025) * 2.0;
     }
     
     const c_float = (x - terrainCacheMinX) * invTerrainCacheRes;
