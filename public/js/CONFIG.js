@@ -619,6 +619,10 @@ const CONFIG = {
     UNITS_CATAPULT_GAP: 8.0,
     MAX_CORPSES: 1500, // Limite de cadáveres renderizados; os mais antigos são reciclados
 
+    // Archers (regras da spec Real-Medieval-Battles.md)
+    ARCHER_RULES_ENABLED: true, // Segurar tiro em alvo engajado + munição limitada
+    ARCHER_AMMO: 24, // Flechas por arqueiro; ao esgotar, vira lutador de adaga
+
     // Catapults
     CATAPULT_MAX: 8,
     CATAPULT_OFFSET_NAPOLEONIC: 4.5,

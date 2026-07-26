@@ -356,6 +356,12 @@ window.findNearestEnemyInGrid = function(warrior) {
     // nenhuma alternativa menos disputada no raio de busca — ex: fim de batalha.
     let lastResortTarget = null;
     let lastResortScore = Infinity;
+    // Tier "segurar fogo" (spec): atiradores evitam alvos já engajados corpo a
+    // corpo por aliados — só usados quando não há alvo livre no raio de busca.
+    let holdFireTarget = null;
+    let holdFireScore = Infinity;
+    const isShooterWarrior = (typeof CONFIG !== 'undefined' && CONFIG.ARCHER_RULES_ENABLED) &&
+        (warrior.role === 'archer' || isNapoleonicTheme()) && !warrior.isDaggerArcher;
 
     // Busca em anéis concêntricos ao redor da unidade
     const maxRing = 20; // Máximo de 20 células de distância (~100 metros) para tropas que recuaram acharem o combate
@@ -410,6 +416,26 @@ window.findNearestEnemyInGrid = function(warrior) {
                     // (≥6 atacantes) vão para o último recurso e NÃO encerram a
                     // busca — o anel seguinte pode ter opções menos disputadas.
                     const atkSize = enemy.attackers ? enemy.attackers.size : 0;
+
+                    // Atiradores: alvos engajados corpo a corpo por aliados vão
+                    // para o tier "segurar fogo" e NÃO encerram a busca
+                    if (isShooterWarrior && atkSize > 0) {
+                        let meleeEngaged = false;
+                        for (const a of enemy.attackers) {
+                            if (!a.isDead && a !== warrior && !a.isPusher && (a.role === 'melee' || a.isDaggerArcher)) {
+                                meleeEngaged = true;
+                                break;
+                            }
+                        }
+                        if (meleeEngaged) {
+                            if (distSq < holdFireScore) {
+                                holdFireScore = distSq;
+                                holdFireTarget = enemy;
+                            }
+                            continue;
+                        }
+                    }
+
                     if (atkSize >= 6 && !enemy.attackers.has(warrior)) {
                         const score = distSq * (1 + (atkSize - 5) * 0.8);
                         if (score < lastResortScore) {
@@ -479,7 +505,7 @@ window.findNearestEnemyInGrid = function(warrior) {
         }
     }
 
-    return bestTarget || bestOccupiedTarget || lastResortTarget;
+    return bestTarget || bestOccupiedTarget || holdFireTarget || lastResortTarget;
 };
 
 const _catapultHasTargetMap = new Map();

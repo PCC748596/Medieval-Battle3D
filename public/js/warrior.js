@@ -138,6 +138,7 @@ class Warrior {
         this.id = faction + "_" + role + "_" + Math.floor(Math.random() * 100000);
 
         this.isDaggerArcher = (role === 'archer' && Math.random() < 0.20);
+        this.ammo = ((role === 'archer' || isNapoleonicTheme()) && !this.isDaggerArcher) ? CONFIG.ARCHER_AMMO : 0;
 
         this.hp = (role === 'melee') ? 220 : 100;
         this.maxHp = this.hp;
@@ -2132,6 +2133,39 @@ class Warrior {
                     createSparks(victim);
                     playClangSound(dmg / 30);
                 } else {
+                    // --- REGRAS DA SPEC (Real-Medieval-Battles.md) ---
+                    if (CONFIG.ARCHER_RULES_ENABLED) {
+                        // "Estou sem flechas? → Recuar": sem munição, vira lutador de adaga
+                        if (this.ammo <= 0) {
+                            this.isDaggerArcher = true;
+                            this.attackRange = 2.8;
+                            this.attackCooldown = 0.3 + Math.random() * 0.3;
+                            this.stateDirty = true;
+                            window.archerDaggerConversions = (window.archerDaggerConversions || 0) + 1;
+                            if (window.CombatProfiler) window.CombatProfiler.end('animação de ataque');
+                            return;
+                        }
+                        // "Existe aliado entre mim e o alvo? → Não atirar":
+                        // não dispara em alvo já engajado corpo a corpo por aliados (risco de fogo amigo)
+                        let meleeEngaged = false;
+                        if (this.target.attackers && this.target.attackers.size > 0) {
+                            for (const a of this.target.attackers) {
+                                if (!a.isDead && a !== this && !a.isPusher && (a.role === 'melee' || a.isDaggerArcher)) {
+                                    meleeEngaged = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (meleeEngaged) {
+                            // Segura o tiro e força re-busca por alvo livre
+                            this.attackCooldown = 0.5 + Math.random() * 0.3;
+                            this.stateDirty = true;
+                            if (window.CombatProfiler) window.CombatProfiler.end('animação de ataque');
+                            return;
+                        }
+                        this.ammo--;
+                    }
+
                     const spawnPos = _spawnPosCache.set(this.x, this.y + 0.8, this.z);
                     const damage = isNapoleonicTheme() ? (35 + Math.floor(Math.random() * 15)) : (12 + Math.floor(Math.random() * 8));
                     
