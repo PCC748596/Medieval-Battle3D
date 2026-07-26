@@ -206,7 +206,7 @@
         
         updateUI() {
             const container = window.getOrCreateRightPanelsContainer ? window.getOrCreateRightPanelsContainer() : null;
-            if (window.panelVisible === false) {
+            if (window.panelVisible === false || window.profilerPanelsVisible === false) {
                 if (container) container.style.display = 'none';
                 if (this.panelElement) {
                     this.panelElement.style.display = 'none';

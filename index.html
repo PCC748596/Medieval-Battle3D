@@ -149,6 +149,47 @@
                 class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500">
         </div>
 
+        <!-- Força Média dos Exércitos (Ataque/Defesa) -->
+        <div class="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80 space-y-2.5">
+            <p class="text-[10px] font-black uppercase text-slate-400 tracking-wider">Força Média dos Combatentes</p>
+            <div>
+                <div class="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+                    <span>⚔️ Cavaleiros — Ataque</span>
+                    <span id="knights-attack-strength-val" class="text-amber-500 font-mono">70</span>
+                </div>
+                <input type="range" min="20" max="100" step="5" value="70"
+                    oninput="setArmyStrength('knights','attack',this.value)"
+                    class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500">
+            </div>
+            <div>
+                <div class="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+                    <span>🛡️ Cavaleiros — Defesa</span>
+                    <span id="knights-defense-strength-val" class="text-amber-500 font-mono">70</span>
+                </div>
+                <input type="range" min="20" max="100" step="5" value="70"
+                    oninput="setArmyStrength('knights','defense',this.value)"
+                    class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-400">
+            </div>
+            <div>
+                <div class="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+                    <span>⚔️ Goblins — Ataque</span>
+                    <span id="goblins-attack-strength-val" class="text-amber-500 font-mono">70</span>
+                </div>
+                <input type="range" min="20" max="100" step="5" value="70"
+                    oninput="setArmyStrength('goblins','attack',this.value)"
+                    class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
+            </div>
+            <div>
+                <div class="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+                    <span>🛡️ Goblins — Defesa</span>
+                    <span id="goblins-defense-strength-val" class="text-amber-500 font-mono">70</span>
+                </div>
+                <input type="range" min="20" max="100" step="5" value="70"
+                    oninput="setArmyStrength('goblins','defense',this.value)"
+                    class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-green-700">
+            </div>
+        </div>
+
         <!-- Seletor de Flanqueadores -->
         <div>
             <div class="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">

@@ -53,7 +53,11 @@ const HUD = {
     updateArmy(faction, count) {
         const el = faction === 'knights' ? this.elements.countKnights : this.elements.countGoblins;
         if (el) {
-            el.innerText = count;
+            let text = String(count);
+            if (typeof CONFIG !== 'undefined' && CONFIG.STRENGTH_SYSTEM_ENABLED && window.armies && window.armies[faction]) {
+                text = `${count} (A${window.armies[faction].attackStrength}/D${window.armies[faction].defenseStrength})`;
+            }
+            el.innerText = text;
         }
     },
 

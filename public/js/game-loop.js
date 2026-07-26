@@ -801,6 +801,9 @@ window.addEventListener('keydown', (e) => {
         radius = Math.max(sizeX, sizeZ) * 0.65;
         updateCameraAngles();
     }
+    if (e.key.toLowerCase() === 'p') {
+        window.profilerPanelsVisible = !window.profilerPanelsVisible;
+    }
     keysPressed[e.key.toLowerCase()] = true;
 });
 

@@ -272,7 +272,7 @@ const PerformanceProfiler = {
     updateDebugPanel: function() {
         const container = window.getOrCreateRightPanelsContainer();
         let panel = document.getElementById('perf-debug-panel');
-        if (window.panelVisible === false) {
+        if (window.panelVisible === false || window.profilerPanelsVisible === false) {
             container.style.display = 'none';
             return;
         } else {
@@ -516,6 +516,9 @@ let archerRatio = 0.2;
 let flankRatio = 0.35;
 let numCloudsSetting = 0;
 window.panelVisible = true;
+// Painéis de instrumentação (PerformanceProfiler + CombatProfiler) começam OCULTOS.
+// Tecla 'P' alterna a visibilidade para depuração.
+window.profilerPanelsVisible = false;
 let lightningTimer = 0;
 let nextLightningTime = 0;
 let flashCountdown = 0;
@@ -622,6 +625,13 @@ const CONFIG = {
     // Archers (regras da spec Real-Medieval-Battles.md)
     ARCHER_RULES_ENABLED: true, // Segurar tiro em alvo engajado + munição limitada
     ARCHER_AMMO: 24, // Flechas por arqueiro; ao esgotar, vira lutador de adaga
+
+    // Sistema de Força (Ataque/Defesa por exército, média dos combatentes)
+    STRENGTH_SYSTEM_ENABLED: true,
+    STRENGTH_BASELINE: 70, // Força de referência (exército "padrão")
+    STRENGTH_SOLDIER_VARIANCE: 0.15, // Variância individual do soldado em torno da média (±15%)
+    STRENGTH_ROLL_VARIANCE: 0.5, // Variância da rolagem contestada (±50%)
+    STRENGTH_HIT_BIAS: 1.4, // Viés de acerto: mantém ritmo de combate próximo do original em forças iguais
 
     // Catapults
     CATAPULT_MAX: 8,

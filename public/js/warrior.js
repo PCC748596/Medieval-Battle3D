@@ -147,6 +147,18 @@ class Warrior {
         const baseSpeed = (role === 'melee') ? army.baseSpeedMelee : army.baseSpeedArcher;
         this.speed = (baseSpeed + Math.random() * 0.02) * 60;
 
+        // Força individual do soldado: média do exército ± variância (sliders do HUD)
+        if (typeof CONFIG !== 'undefined' && CONFIG.STRENGTH_SYSTEM_ENABLED) {
+            const sv = CONFIG.STRENGTH_SOLDIER_VARIANCE;
+            const atkMean = army.attackStrength || CONFIG.STRENGTH_BASELINE;
+            const defMean = army.defenseStrength || CONFIG.STRENGTH_BASELINE;
+            this.attackStrength = Math.max(20, Math.round(atkMean * (1 - sv + Math.random() * 2 * sv)));
+            this.defenseStrength = Math.max(20, Math.round(defMean * (1 - sv + Math.random() * 2 * sv)));
+        } else {
+            this.attackStrength = 70;
+            this.defenseStrength = 70;
+        }
+
         this.attackRange = isNapoleonicTheme() ? 100.0 : (((role === 'melee' || this.isDaggerArcher)) ? 2.8 : 100.0);
         this.keepDistanceRange = 0; // Archers will stand their ground and shoot point-blank instead of running away
         this.attackCooldown = 0;
@@ -2125,13 +2137,30 @@ class Warrior {
             if (this.target && !this.target.isDead) {
                 if (!isShooter) {
                     const isDagger = this.isDaggerArcher;
-                    const dmg = isDagger ? (22 + Math.floor(Math.random() * 18)) : (15 + Math.floor(Math.random() * 15));
                     // Captura a referência: se o golpe matar, die() anula this.target do atacante
                     const victim = this.target;
-                    victim.takeDamage(dmg, this);
-                    this.morale = Math.min(70, this.morale + 1);
-                    createSparks(victim);
-                    playClangSound(dmg / 30);
+
+                    // --- SISTEMA DE FORÇA: rolagem contestada Ataque × Defesa ---
+                    let defended = false;
+                    if (CONFIG.STRENGTH_SYSTEM_ENABLED) {
+                        const rv = CONFIG.STRENGTH_ROLL_VARIANCE;
+                        const atkRoll = this.attackStrength * (1 - rv + Math.random() * 2 * rv) * CONFIG.STRENGTH_HIT_BIAS;
+                        const defRoll = (victim.defenseStrength || CONFIG.STRENGTH_BASELINE) * (1 - rv + Math.random() * 2 * rv);
+                        defended = (atkRoll <= defRoll);
+                    }
+
+                    if (defended) {
+                        // Golpe defendido: sem dano de HP, mas abala a moral do defensor
+                        if (victim.morale !== undefined) victim.morale = Math.max(1, victim.morale - 0.5);
+                        createSparks(victim);
+                        playClangSound(0.3);
+                    } else {
+                        const dmg = isDagger ? (22 + Math.floor(Math.random() * 18)) : (15 + Math.floor(Math.random() * 15));
+                        victim.takeDamage(dmg, this);
+                        this.morale = Math.min(70, this.morale + 1);
+                        createSparks(victim);
+                        playClangSound(dmg / 30);
+                    }
                 } else {
                     // --- REGRAS DA SPEC (Real-Medieval-Battles.md) ---
                     if (CONFIG.ARCHER_RULES_ENABLED) {
@@ -2167,7 +2196,12 @@ class Warrior {
                     }
 
                     const spawnPos = _spawnPosCache.set(this.x, this.y + 0.8, this.z);
-                    const damage = isNapoleonicTheme() ? (35 + Math.floor(Math.random() * 15)) : (12 + Math.floor(Math.random() * 8));
+                    const baseDamage = isNapoleonicTheme() ? (35 + Math.floor(Math.random() * 15)) : (12 + Math.floor(Math.random() * 8));
+                    // Sistema de força: dano da flecha escala pela razão Ataque/Defesa
+                    let damage = baseDamage;
+                    if (CONFIG.STRENGTH_SYSTEM_ENABLED && this.target.defenseStrength) {
+                        damage = Math.max(1, Math.round(baseDamage * (this.attackStrength / this.target.defenseStrength)));
+                    }
                     
                     let wasTreeDefended = false;
                     if (typeof checkNearTree === 'function') {

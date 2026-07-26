@@ -514,6 +514,8 @@ window.armies = {
         isFrench: true,
         baseSpeedMelee: 0.10,
         baseSpeedArcher: 0.07,
+        attackStrength: 70, // Força média de ataque dos combatentes (slider)
+        defenseStrength: 70, // Força média de defesa dos combatentes (slider)
         catapultDir: 1,
         catapultRotationY: -Math.PI / 2,
         get enemies() { return battleManager.getGoblins(); },
@@ -532,6 +534,8 @@ window.armies = {
         isFrench: false,
         baseSpeedMelee: 0.10,
         baseSpeedArcher: 0.07,
+        attackStrength: 70, // Força média de ataque dos combatentes (slider)
+        defenseStrength: 70, // Força média de defesa dos combatentes (slider)
         catapultDir: -1,
         catapultRotationY: Math.PI / 2,
         get enemies() { return battleManager.getKnights(); },
@@ -636,6 +640,18 @@ function registerGroups(faction, groups) {
 function updateArmyCounters() {
     HUD.updateArmyCounts(battleManager.getKnights().length, battleManager.getGoblins().length);
 }
+
+// Ajusta a força média (ataque/defesa) de um exército via sliders do HUD.
+// Aplica-se aos soldados criados a partir da mudança (spawn/reforços/reset).
+window.setArmyStrength = function (faction, kind, value) {
+    const v = Math.max(20, Math.min(100, parseInt(value) || CONFIG.STRENGTH_BASELINE));
+    if (!window.armies[faction]) return;
+    if (kind === 'attack') window.armies[faction].attackStrength = v;
+    else window.armies[faction].defenseStrength = v;
+    const label = document.getElementById(`${faction}-${kind}-strength-val`);
+    if (label) label.innerText = v;
+    updateArmyCounters();
+};
 
 function spawnUnits(faction, quantity) {
     const { numArchers, numMelee } = calculateArmyComposition(quantity, archerRatio, isNapoleonicTheme);
