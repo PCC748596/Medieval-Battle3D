@@ -627,6 +627,11 @@ const CONFIG = {
     ARCHER_RULES_ENABLED: true, // Segurar tiro em alvo engajado + munição limitada
     ARCHER_AMMO: 24, // Flechas por arqueiro; ao esgotar, vira lutador de adaga
 
+    // Flanqueadores: priorizam arqueiros/catapultas e evitam guerreiros
+    FLANKER_RULES_ENABLED: true,
+    FLANKER_SELF_DEFENSE_RANGE_SQ: 9, // Inimigo colado (≤3m) é engajado por autodefesa
+    FLANKER_ENGAGE_RANGE_SQ: 1225, // Só "trava" no arqueiro a ≤35m; antes disso, faz o arco de flanco
+
     // Sistema de Força (Ataque/Defesa por exército, média dos combatentes)
     STRENGTH_SYSTEM_ENABLED: true,
     STRENGTH_BASELINE: 70, // Força de referência (exército "padrão")

@@ -1468,14 +1468,24 @@ class Warrior {
                 }
             } else if (this.isFlanker) {
                 this.currentState = 'FLANKING';
-                const dirX = window.armies[this.faction].dirX;
+                // dirX marca o LADO de spawn (battle.js usa dirX para posicionar o exército); o avanço é na direção oposta
+                const dirX = -window.armies[this.faction].dirX;
                 const flankDirZ = (this.uid % 2 === 0) ? 1.0 : -1.0;
-                this.lastVelocity.set(dirX * this.speed * 0.7, 0, flankDirZ * this.speed * 0.7);
+                // Deriva lateral só até a faixa do flanco; depois marcha reto (e mais rápido)
+                const lane = this.flankLane || 120;
+                let vx = dirX * this.speed * 0.7;
+                let vz = flankDirZ * this.speed * 0.7;
+                if ((flankDirZ > 0 && this.z >= lane) || (flankDirZ < 0 && this.z <= -lane)) {
+                    vz = 0;
+                    vx = dirX * this.speed;
+                }
+                this.lastVelocity.set(vx, 0, vz);
                 this.lastTargetAngle = Math.atan2(this.lastVelocity.x, this.lastVelocity.z);
                 this.isTryingToMove = true;
             } else {
                 this.currentState = 'ADVANCING';
-                const dirX = window.armies[this.faction].dirX;
+                // dirX marca o LADO de spawn (battle.js usa dirX para posicionar o exército); o avanço é na direção oposta
+                const dirX = -window.armies[this.faction].dirX;
                 this.lastVelocity.set(dirX * this.speed, 0, 0);
                 this.lastTargetAngle = Math.atan2(dirX, 0) + Math.PI;
                 this.isTryingToMove = true;
@@ -1737,14 +1747,24 @@ class Warrior {
                 }
             } else if (this.isFlanker) {
                 this.currentState = 'FLANKING';
-                const dirX = window.armies[this.faction].dirX;
+                // dirX marca o LADO de spawn (battle.js usa dirX para posicionar o exército); o avanço é na direção oposta
+                const dirX = -window.armies[this.faction].dirX;
                 const flankDirZ = (this.uid % 2 === 0) ? 1.0 : -1.0;
-                this.lastVelocity.set(dirX * this.speed * 0.7, 0, flankDirZ * this.speed * 0.7);
+                // Deriva lateral só até a faixa do flanco; depois marcha reto (e mais rápido)
+                const lane = this.flankLane || 120;
+                let vx = dirX * this.speed * 0.7;
+                let vz = flankDirZ * this.speed * 0.7;
+                if ((flankDirZ > 0 && this.z >= lane) || (flankDirZ < 0 && this.z <= -lane)) {
+                    vz = 0;
+                    vx = dirX * this.speed;
+                }
+                this.lastVelocity.set(vx, 0, vz);
                 this.lastTargetAngle = Math.atan2(this.lastVelocity.x, this.lastVelocity.z);
                 this.isTryingToMove = true;
             } else {
                 this.currentState = 'ADVANCING';
-                const dirX = window.armies[this.faction].dirX;
+                // dirX marca o LADO de spawn (battle.js usa dirX para posicionar o exército); o avanço é na direção oposta
+                const dirX = -window.armies[this.faction].dirX;
                 this.lastVelocity.set(dirX * this.speed, 0, 0);
                 this.lastTargetAngle = Math.atan2(dirX, 0) + Math.PI;
                 this.isTryingToMove = true;
@@ -1790,13 +1810,78 @@ class Warrior {
             if (window.CombatProfiler) window.CombatProfiler.start('busca de inimigo');
             if (window.PerformanceProfiler) window.PerformanceProfiler.start('busca_inimigos');
             // 1. Tenta buscar inimigo vivo próximo usando o Grid Espacial (O(1))
+            let gridTarget = null;
             if (window.findNearestEnemyInGrid) {
-                bestTarget = window.findNearestEnemyInGrid(this);
+                gridTarget = window.findNearestEnemyInGrid(this);
+            }
+
+            const flankerRulesOn = (typeof CONFIG !== 'undefined' && CONFIG.FLANKER_RULES_ENABLED);
+            let flankerHunting = false; // true quando o flanqueador segue em arco de flanco (sem alvo de propósito)
+            if (this.isFlanker && flankerRulesOn && (this.role === 'melee' || this.isDaggerArcher)) {
+                // FLANQUEADOR: prioriza arqueiros e catapultas, evitando engajar
+                // guerreiros inimigos. Exceção de autodefesa: GUERREIRO colado
+                // (≤3m) é engajado normalmente — a menos que já haja um arqueiro
+                // ao alcance da espada (≤6m), que sempre tem prioridade.
+                let adjacentWarrior = null;
+                if (gridTarget && gridTarget.role === 'melee') {
+                    const adx = getTargetX(gridTarget) - this.x;
+                    const adz = getTargetZ(gridTarget) - this.z;
+                    if (adx * adx + adz * adz <= CONFIG.FLANKER_SELF_DEFENSE_RANGE_SQ) adjacentWarrior = gridTarget;
+                }
+                // Varredura pelo arqueiro vivo menos disputado DENTRO do raio
+                // de engajamento (≤35m). Arqueiros mais longe NÃO viram alvo:
+                // o flanqueador continua no arco de flanco (estado FLANKING)
+                // até contornar a linha inimiga — é isso que o leva à retaguarda
+                // em vez de atravessar o muro de guerreiros.
+                let bestArcher = null, bestArcherScore = Infinity, bestArcherDSq = Infinity;
+                let lastResortArcher = null, lastResortArcherScore = Infinity, lastResortArcherDSq = Infinity;
+                let anyArcherAlive = false;
+                let maxArcherAbsZ = 0;
+                for (let i = 0; i < opponents.length; i++) {
+                    const enemy = opponents[i];
+                    if (!enemy || enemy.isDead || enemy.role !== 'archer') continue;
+                    anyArcherAlive = true;
+                    const absZ = Math.abs(enemy.z);
+                    if (absZ > maxArcherAbsZ) maxArcherAbsZ = absZ;
+                    const dx = enemy.x - this.x;
+                    const dz = enemy.z - this.z;
+                    const dSq = dx * dx + dz * dz;
+                    if (dSq > CONFIG.FLANKER_ENGAGE_RANGE_SQ) continue;
+                    const atkSize = enemy.attackers ? enemy.attackers.size : 0;
+                    if (atkSize >= 6 && !enemy.attackers.has(this)) {
+                        const score = dSq * (1 + (atkSize - 5) * 0.8);
+                        if (score < lastResortArcherScore) { lastResortArcherScore = score; lastResortArcher = enemy; lastResortArcherDSq = dSq; }
+                        continue;
+                    }
+                    const score = dSq * (1 + atkSize * 0.5);
+                    if (score < bestArcherScore) { bestArcherScore = score; bestArcher = enemy; bestArcherDSq = dSq; }
+                }
+                const nearArcher = bestArcher || lastResortArcher;
+                const nearArcherDSq = bestArcher ? bestArcherDSq : lastResortArcherDSq;
+                if (nearArcher && nearArcherDSq <= 36) {
+                    bestTarget = nearArcher; // arqueiro ao alcance da espada: prioridade máxima
+                } else if (adjacentWarrior) {
+                    bestTarget = adjacentWarrior; // autodefesa contra guerreiro colado
+                } else if (nearArcher) {
+                    bestTarget = nearArcher; // arqueiro dentro do raio de engajamento
+                } else if (anyArcherAlive) {
+                    // Há arqueiros vivos mas fora de alcance: segue o flanco sem alvo.
+                    // Define a "faixa" lateral do arco: um pouco além da formação
+                    // inimiga, para não derivar até a borda do mapa.
+                    this.flankLane = Math.min(maxArcherAbsZ + 25, (typeof sizeZ !== 'undefined' ? sizeZ / 2 : 250) - 15);
+                    flankerHunting = true;
+                } else {
+                    // Sem arqueiros vivos: age como guerreiro normal
+                    bestTarget = gridTarget;
+                }
+            } else {
+                bestTarget = gridTarget;
             }
 
             // 2. Se não encontrar nenhum inimigo próximo no Grid (armadas distantes no início),
             // escolhe o oponente vivo no MESMO CORREDOR (mesmo eixo Z) para marchar em linha reta paralela!
-            if (!bestTarget && opponents.length > 0) {
+            // (Flanqueadores em arco de flanco pulam esta etapa de propósito: seguem sem alvo.)
+            if (!bestTarget && !flankerHunting && opponents.length > 0) {
                 let minZDiff = Infinity;
                 if (window.CombatProfiler) window.CombatProfiler.start('qualquer loop sobre inimigos');
                 for (let i = 0; i < opponents.length; i++) {

@@ -3,7 +3,7 @@
 // Som ambiente único do jogo: loop de tambores de batalha
 let soundEnabled = false;
 
-const bgMusic = new Audio("sounds/tribe-drum-loop.wav");
+const bgMusic = new Audio("sounds/Tribal-drum-loop.mp3");
 bgMusic.loop = true;
 bgMusic.volume = 0.45;
 
