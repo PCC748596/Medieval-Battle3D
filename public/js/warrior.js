@@ -128,6 +128,8 @@ class Warrior {
     set(x,y,z) { this.x=x; this.y=y; this.z=z; }
     constructor(faction, role, x, z, isPusher = false, catapult = null) {
         this.uid = warriorUidCounter++;
+        this.isWarrior = true; // Flag para renderList evitar comparação de string com constructor.name
+        this._armyIndex = -1; // Índice na lista do exército para remoção O(1) (swap-and-pop)
         this.faction = faction;
         this.role = role;
         this.isPusher = isPusher;
@@ -1801,10 +1803,13 @@ class Warrior {
 
             if (window.PerformanceProfiler) window.PerformanceProfiler.start('selecao_alvo');
             // 3. Se houver catapultas inimigas e formos Flankers ou DaggerArchers (ou a cada tick longo de busca),
-            // prioriza atacar a catapulta se ela estiver ao alcance visual ou estratégico.
+            // prioriza atacar a catapulta se ela estiver ao alcance visual ou estratégico (~40m).
+            // A escolha usa penalidade por aglomeração para espalhar os atacantes entre as catapultas.
             const catapults = battleManager.getCatapults();
             if (catapults.length > 0) {
                 const p1 = this;
+                let bestCat = null;
+                let bestCatScore = Infinity;
                 if (window.CombatProfiler) window.CombatProfiler.start('qualquer loop sobre inimigos');
                 for (let i = 0; i < catapults.length; i++) {
                     const cat = catapults[i];
@@ -1817,13 +1822,18 @@ class Warrior {
                     const dSq = dx * dx + dz * dz;
                     if (window.CombatProfiler) window.CombatProfiler.end('cálculo de distância');
 
-                    // Se a catapulta estiver próxima (~40 unidades) ou se formos flanqueadores/dagger archers dedicados
-                    if (dSq < 200 || (dSq < 1600 && (this.isFlanker || this.isDaggerArcher || this.aiTick % 96 === 0)) || this.isFlanker || this.isDaggerArcher) {
-                        bestTarget = cat;
-                        break;
+                    // Se a catapulta estiver próxima (~14m) ou se formos flanqueadores/dagger archers num raio de ~40m
+                    if (dSq < 200 || (dSq < 1600 && (this.isFlanker || this.isDaggerArcher || this.aiTick % 96 === 0))) {
+                        const catAtk = cat.attackers ? cat.attackers.size : 0;
+                        const catScore = dSq * (1 + catAtk * 0.5);
+                        if (catScore < bestCatScore) {
+                            bestCatScore = catScore;
+                            bestCat = cat;
+                        }
                     }
                 }
                 if (window.CombatProfiler) window.CombatProfiler.end('qualquer loop sobre inimigos');
+                if (bestCat) bestTarget = bestCat;
             }
 
             if (bestTarget) {
@@ -1998,41 +2008,86 @@ class Warrior {
         playDeathSound();
         battleManager.setKills(battleManager.getKills() + 1);
 
-        HUD.updateKills(battleManager.getKills());
+        // Contadores do HUD são atualizados no máximo 1x por frame (flush no game-loop)
+        window.hudCountersDirty = true;
 
         window.armies[this.faction].addDeadCount();
-        const idx = window.armies[this.faction].list.indexOf(this);
-        if (idx !== -1) window.armies[this.faction].list.splice(idx, 1);
-        HUD.updateArmy(this.faction, window.armies[this.faction].list.length);
 
-        battleManager.getDeadWarriors().push(this);
+        // Remoção O(1) da lista do exército: swap-and-pop com índice rastreado.
+        // Seguro porque todos os loops sobre as listas iteram de trás para frente.
+        const list = window.armies[this.faction].list;
+        const idx = this._armyIndex;
+        if (idx >= 0 && idx < list.length && list[idx] === this) {
+            const lastIdx = list.length - 1;
+            if (idx !== lastIdx) {
+                const moved = list[lastIdx];
+                list[idx] = moved;
+                moved._armyIndex = idx;
+            }
+            list.pop();
+        } else {
+            // Fallback de segurança caso o índice esteja dessincronizado
+            const fallbackIdx = list.indexOf(this);
+            if (fallbackIdx !== -1) list.splice(fallbackIdx, 1);
+        }
+
+        // Cap de cadáveres: recicla o mais antigo quando atinge o limite
+        const deadList = battleManager.getDeadWarriors();
+        const maxCorpses = (typeof CONFIG !== 'undefined' && CONFIG.MAX_CORPSES) || 1500;
+        if (deadList.length >= maxCorpses) {
+            const oldest = deadList[0];
+            if (oldest.uniqueBodyMat) oldest.uniqueBodyMat.dispose();
+            deadList[0] = deadList[deadList.length - 1];
+            deadList.pop();
+        }
+        deadList.push(this);
 
         this.rotZ = Math.PI / 2 * (Math.random() > 0.5 ? 1 : -1);
         this.y = getTerrainHeight(this.x, this.z) + 0.2;
 
         // --- EVENTO: Alvo morreu ---
-        // Notifica inimigos que tinham esse guerreiro como alvo para escolherem um novo alvo
-        const enemyFaction = this.faction === 'knights' ? 'goblins' : 'knights';
-        const enemyList = window.armies[enemyFaction].list;
-        for (let i = 0; i < enemyList.length; i++) {
-            const enemy = enemyList[i];
-            if (enemy.target === this) {
-                enemy.target = null;
-                enemy.stateDirty = true;
+        // Notifica apenas os inimigos que tinham este guerreiro como alvo (Set attackers) — O(atacantes)
+        for (const attacker of this.attackers) {
+            if (attacker.target === this) {
+                attacker.target = null;
+                attacker.stateDirty = true;
             }
         }
+        this.attackers.clear();
 
         // --- EVENTO: Abriu espaço na formação ---
-        // Notifica aliados próximos que um guerreiro morreu para recalcularem seus desvios e posições
-        const allyList = window.armies[this.faction].list;
-        for (let i = 0; i < allyList.length; i++) {
-            const ally = allyList[i];
-            if (ally === this) continue;
-            const dx = ally.x - this.x;
-            const dz = ally.z - this.z;
-            if (dx * dx + dz * dz < 15 * 15) { // raio de 15 metros
-                ally.stateDirty = true;
-                ally.morale = Math.max(1, ally.morale - 0.5); // Reduzido penalty de 2 para 0.5 para evitar flee instantaneo da linha de frente inteira
+        // Notifica aliados num raio de 15m via spatial grid (3 células de 5m) — O(vizinhos)
+        if (window.spatialGrid && window.GRID_COLS && window.GRID_CELL_SIZE) {
+            const gridCols = window.GRID_COLS;
+            const cellSize = window.GRID_CELL_SIZE;
+            const halfX = (typeof sizeX !== 'undefined' ? sizeX : 1000) / 2 + 10;
+            const halfZ = (typeof sizeZ !== 'undefined' ? sizeZ : 1000) / 2 + 10;
+
+            const col = Math.max(0, Math.min(gridCols - 1, Math.floor((this.x + halfX) / cellSize)));
+            const row = Math.max(0, Math.min(window.GRID_ROWS - 1, Math.floor((this.z + halfZ) / cellSize)));
+
+            const cellRange = 3; // 15m / 5m por célula
+            const minCol = Math.max(0, col - cellRange);
+            const maxCol = Math.min(gridCols - 1, col + cellRange);
+            const minRow = Math.max(0, row - cellRange);
+            const maxRow = Math.min(window.GRID_ROWS - 1, row + cellRange);
+            const moraleRadiusSq = 15 * 15;
+
+            for (let r = minRow; r <= maxRow; r++) {
+                for (let c = minCol; c <= maxCol; c++) {
+                    const cell = window.spatialGrid[c + r * gridCols];
+                    if (!cell || cell.length === 0) continue;
+                    for (let i = 0; i < cell.length; i++) {
+                        const ally = cell[i];
+                        if (ally === this || ally.isDead || ally.faction !== this.faction) continue;
+                        const dx = ally.x - this.x;
+                        const dz = ally.z - this.z;
+                        if (dx * dx + dz * dz < moraleRadiusSq) { // raio de 15 metros
+                            ally.stateDirty = true;
+                            ally.morale = Math.max(1, ally.morale - 0.5); // Reduzido penalty de 2 para 0.5 para evitar flee instantaneo da linha de frente inteira
+                        }
+                    }
+                }
             }
         }
 
@@ -2070,9 +2125,11 @@ class Warrior {
                 if (!isShooter) {
                     const isDagger = this.isDaggerArcher;
                     const dmg = isDagger ? (22 + Math.floor(Math.random() * 18)) : (15 + Math.floor(Math.random() * 15));
-                    this.target.takeDamage(dmg, this);
+                    // Captura a referência: se o golpe matar, die() anula this.target do atacante
+                    const victim = this.target;
+                    victim.takeDamage(dmg, this);
                     this.morale = Math.min(70, this.morale + 1);
-                    createSparks(this.target);
+                    createSparks(victim);
                     playClangSound(dmg / 30);
                 } else {
                     const spawnPos = _spawnPosCache.set(this.x, this.y + 0.8, this.z);

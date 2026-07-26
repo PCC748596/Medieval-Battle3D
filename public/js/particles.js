@@ -13,55 +13,52 @@ const arrowTrailMaterial = new THREE.MeshBasicMaterial({
 
 
 function createBlood(position) {
+    // Em unidades distantes (LOD 2+) o sangue é imperceptível: economiza o pool
+    if (position.lodLevel !== undefined && position.lodLevel >= 2) return;
     const numParticles = 16 + Math.floor(Math.random() * 12);
-    let spawned = 0;
-    for (let attempt = 0; attempt < ParticlePool.pool.length && spawned < numParticles; attempt++) {
+    // Pool O(1): no máximo numParticles tentativas; para quando esgota
+    for (let i = 0; i < numParticles; i++) {
         const p = ParticlePool.get();
-        if (p) {
-            p.mesh.material = bloodMaterial;
-            p.mesh.position.copy(position);
-            p.mesh.position.y += 0.2;
-            p.mesh.scale.set(2.2, 2.2, 2.2);
-            p.mesh.visible = true;
+        if (!p) return;
+        p.mesh.material = bloodMaterial;
+        p.mesh.position.copy(position);
+        p.mesh.position.y += 0.2;
+        p.mesh.scale.set(2.2, 2.2, 2.2);
+        p.mesh.visible = true;
 
-            p.velocity.set(
-                (Math.random() - 0.5) * 5,
-                3.0 + Math.random() * 5,
-                (Math.random() - 0.5) * 5
-            );
-            p.life = 0.5 + Math.random() * 0.4;
-            p.maxLife = p.life;
-            p.type = 'blood';
-            battleManager.addParticle(p);
-            spawned++;
-        }
+        p.velocity.set(
+            (Math.random() - 0.5) * 5,
+            3.0 + Math.random() * 5,
+            (Math.random() - 0.5) * 5
+        );
+        p.life = 0.5 + Math.random() * 0.4;
+        p.maxLife = p.life;
+        p.type = 'blood';
+        battleManager.addParticle(p);
     }
 }
 
 function createWaterSplash(position) {
     const numParticles = 3 + Math.floor(Math.random() * 3);
-    let spawned = 0;
-    for (let attempt = 0; attempt < ParticlePool.pool.length && spawned < numParticles; attempt++) {
+    for (let i = 0; i < numParticles; i++) {
         const p = ParticlePool.get();
-        if (p) {
-            p.mesh.material = waterMaterial;
-            p.mesh.position.copy(position);
-            p.mesh.position.y -= 1.4;
-            p.mesh.scale.set(1.5, 1.5, 1.5);
-            p.mesh.visible = true;
+        if (!p) return;
+        p.mesh.material = waterMaterial;
+        p.mesh.position.copy(position);
+        p.mesh.position.y -= 1.4;
+        p.mesh.scale.set(1.5, 1.5, 1.5);
+        p.mesh.visible = true;
 
-            p.velocity.set(
-                (Math.random() - 0.5) * 2,
-                4.0 + Math.random() * 4,
-                (Math.random() - 0.5) * 2
-            );
-            p.life = 0.4 + Math.random() * 0.3;
-            p.maxLife = p.life;
-            p.type = 'water';
+        p.velocity.set(
+            (Math.random() - 0.5) * 2,
+            4.0 + Math.random() * 4,
+            (Math.random() - 0.5) * 2
+        );
+        p.life = 0.4 + Math.random() * 0.3;
+        p.maxLife = p.life;
+        p.type = 'water';
 
-            battleManager.addParticle(p);
-            spawned++;
-        }
+        battleManager.addParticle(p);
     }
 }
 
@@ -69,28 +66,25 @@ function createSparks(position, useLeaves) {
     const numSparks = 6 + Math.floor(Math.random() * 4);
     const activeMat = useLeaves ? leafMaterial : sparkMaterial;
 
-    let spawned = 0;
-    for (let attempt = 0; attempt < ParticlePool.pool.length && spawned < numSparks; attempt++) {
+    for (let i = 0; i < numSparks; i++) {
         const p = ParticlePool.get();
-        if (p) {
-            p.mesh.material = activeMat;
-            p.mesh.position.copy(position);
-            p.mesh.position.y += 0.5;
-            p.mesh.scale.set(1.0, 1.0, 1.0);
-            p.mesh.visible = true;
+        if (!p) return;
+        p.mesh.material = activeMat;
+        p.mesh.position.copy(position);
+        p.mesh.position.y += 0.5;
+        p.mesh.scale.set(1.0, 1.0, 1.0);
+        p.mesh.visible = true;
 
-            p.velocity.set(
-                (Math.random() - 0.5) * 5,
-                2.5 + Math.random() * 3,
-                (Math.random() - 0.5) * 5
-            );
-            p.life = 0.8;
-            p.maxLife = 0.8;
-            p.type = useLeaves ? 'leaf' : 'spark';
+        p.velocity.set(
+            (Math.random() - 0.5) * 5,
+            2.5 + Math.random() * 3,
+            (Math.random() - 0.5) * 5
+        );
+        p.life = 0.8;
+        p.maxLife = 0.8;
+        p.type = useLeaves ? 'leaf' : 'spark';
 
-            battleManager.addParticle(p);
-            spawned++;
-        }
+        battleManager.addParticle(p);
     }
 }
 
@@ -187,14 +181,14 @@ const BoulderPool = {
 
 const ParticlePool = {
     pool: [],
-    freeIndex: 0,
+    freeStack: [], // Lista O(1) de partículas livres — substitui a varredura linear
     MAX_PARTICLES: 800,
     isInitialized: false,
 
     initPool: function(particleGeometry, sparkMaterial) {
         if (this.isInitialized) return;
         this.isInitialized = true;
-        
+
         for (let i = 0; i < this.MAX_PARTICLES; i++) {
             const mesh = new THREE.Mesh(particleGeometry, sparkMaterial);
             mesh.visible = false;
@@ -202,28 +196,21 @@ const ParticlePool = {
             if (typeof scene !== 'undefined') {
                 scene.add(mesh);
             }
-            this.pool.push({
+            const entry = {
                 mesh: mesh,
                 velocity: new THREE.Vector3(),
                 life: 0,
                 maxLife: 0,
                 type: 'spark'
-            });
+            };
+            this.pool.push(entry);
+            this.freeStack.push(entry);
         }
     },
 
     get: function() {
-        if (!this.isInitialized) return null;
-        
-        const poolLen = this.pool.length;
-        for (let attempt = 0; attempt < poolLen; attempt++) {
-            this.freeIndex = (this.freeIndex + 1) % poolLen;
-            const p = this.pool[this.freeIndex];
-            if (p.life <= 0) {
-                return p;
-            }
-        }
-        return null; // Pool cheia
+        if (!this.isInitialized || this.freeStack.length === 0) return null;
+        return this.freeStack.pop();
     },
 
     release: function(particle) {
@@ -231,6 +218,7 @@ const ParticlePool = {
         if (particle.mesh) {
             particle.mesh.visible = false;
         }
+        this.freeStack.push(particle);
     },
 
     releaseAll: function(activeParticlesArray) {

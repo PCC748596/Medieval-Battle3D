@@ -242,6 +242,14 @@ let spatialGrid = Array.from({ length: GRID_COLS * GRID_ROWS }, () => []);
 const allWarriors = [];
 const activeCellIndices = [];
 
+// Bounding box (em células) das posições ocupadas por cada facção, recalculada a
+// cada populateSpatialGrid. Permite ao findNearestEnemyInGrid pular anéis vazios.
+// Convenção: maxCol === -1 indica que a facção não tem unidades vivas no grid.
+const gridFactionBounds = {
+    knights: { minCol: 0, maxCol: -1, minRow: 0, maxRow: -1 },
+    goblins: { minCol: 0, maxCol: -1, minRow: 0, maxRow: -1 }
+};
+
 // Expor variáveis críticas para escopo global do navegador
 window.GRID_CELL_SIZE = GRID_CELL_SIZE;
 window.GRID_COLS = GRID_COLS;
@@ -249,6 +257,7 @@ window.GRID_ROWS = GRID_ROWS;
 window.spatialGrid = spatialGrid;
 window.activeCellIndices = activeCellIndices;
 window.allWarriors = allWarriors;
+window.gridFactionBounds = gridFactionBounds;
 
 function rebuildSpatialGrid() {
     window.GRID_COLS = Math.ceil((sizeX + 20) / window.GRID_CELL_SIZE);
@@ -292,6 +301,11 @@ window.populateSpatialGrid = function() {
     }
 
     const length = window.allWarriors.length;
+
+    // Reseta o bounding box de cada facção (maxCol === -1 = facção ausente do grid)
+    gridFactionBounds.knights.maxCol = -1;
+    gridFactionBounds.goblins.maxCol = -1;
+
     if (length === 0) return;
 
     const halfX = sizeX / 2 + 10;
@@ -307,6 +321,20 @@ window.populateSpatialGrid = function() {
             window.activeCellIndices.push(index);
         }
         cell.push(w);
+
+        // Atualiza o bounding box da facção
+        const fb = gridFactionBounds[w.faction];
+        if (fb) {
+            if (fb.maxCol === -1) {
+                fb.minCol = fb.maxCol = col;
+                fb.minRow = fb.maxRow = row;
+            } else {
+                if (col < fb.minCol) fb.minCol = col;
+                if (col > fb.maxCol) fb.maxCol = col;
+                if (row < fb.minRow) fb.minRow = row;
+                if (row > fb.maxRow) fb.maxRow = row;
+            }
+        }
     }
 };
 
@@ -321,13 +349,35 @@ window.findNearestEnemyInGrid = function(warrior) {
     const row = Math.max(0, Math.min(window.GRID_ROWS - 1, Math.floor((pz + halfZ) / window.GRID_CELL_SIZE)));
 
     let bestTarget = null;
-    let bestDistSq = Infinity;
+    let bestScore = Infinity;
     let bestOccupiedTarget = null;
-    let bestOccupiedDistSq = Infinity;
+    let bestOccupiedScore = Infinity;
+    // Último recurso: inimigos saturados (≥6 atacantes). Só usado quando não há
+    // nenhuma alternativa menos disputada no raio de busca — ex: fim de batalha.
+    let lastResortTarget = null;
+    let lastResortScore = Infinity;
 
     // Busca em anéis concêntricos ao redor da unidade
     const maxRing = 20; // Máximo de 20 células de distância (~100 metros) para tropas que recuaram acharem o combate
-    for (let ring = 0; ring <= maxRing; ring++) {
+
+    // Early-out via bounding box das células inimigas (calculada no populateSpatialGrid):
+    // nenhum inimigo pode estar mais perto do que a distância (Chebyshev) até a bbox,
+    // então a busca começa direto no anel correto, sem varrer anéis vazios.
+    const enemyFactionKey = warrior.faction === 'knights' ? 'goblins' : 'knights';
+    const eb = window.gridFactionBounds ? window.gridFactionBounds[enemyFactionKey] : null;
+    let startRing = 0;
+    if (eb) {
+        if (eb.maxCol === -1) {
+            startRing = maxRing + 1; // Sem inimigos vivos no grid: pula a busca em anéis
+        } else {
+            const dCol = Math.max(eb.minCol - col, col - eb.maxCol, 0);
+            const dRow = Math.max(eb.minRow - row, row - eb.maxRow, 0);
+            startRing = Math.max(dCol, dRow);
+            if (startRing > 0) startRing--; // Margem de segurança de 1 anel
+        }
+    }
+
+    for (let ring = startRing; ring <= maxRing; ring++) {
         let foundInRing = false;
 
         const minRow = Math.max(0, row - ring);
@@ -354,15 +404,31 @@ window.findNearestEnemyInGrid = function(warrior) {
                     const dz = enemy.z - pz;
                     const distSq = dx * dx + dz * dz;
 
-                    const isOccupied = (enemy.attackers && enemy.attackers.size >= 3 && !enemy.attackers.has(warrior));
+                    // Score com penalidade por aglomeração: distribui os atacantes
+                    // pelos inimigos da linha de frente em vez de convergir todos
+                    // para o mesmo alvo (evita o efeito "14x1"). Inimigos saturados
+                    // (≥6 atacantes) vão para o último recurso e NÃO encerram a
+                    // busca — o anel seguinte pode ter opções menos disputadas.
+                    const atkSize = enemy.attackers ? enemy.attackers.size : 0;
+                    if (atkSize >= 6 && !enemy.attackers.has(warrior)) {
+                        const score = distSq * (1 + (atkSize - 5) * 0.8);
+                        if (score < lastResortScore) {
+                            lastResortScore = score;
+                            lastResortTarget = enemy;
+                        }
+                        continue;
+                    }
+                    const isOccupied = (atkSize >= 3 && !enemy.attackers.has(warrior));
                     if (isOccupied) {
-                        if (distSq < bestOccupiedDistSq) {
-                            bestOccupiedDistSq = distSq;
+                        const score = distSq * (1 + (atkSize - 2) * 0.6);
+                        if (score < bestOccupiedScore) {
+                            bestOccupiedScore = score;
                             bestOccupiedTarget = enemy;
                         }
                     } else {
-                        if (distSq < bestDistSq) {
-                            bestDistSq = distSq;
+                        const score = distSq * (1 + atkSize * 0.35);
+                        if (score < bestScore) {
+                            bestScore = score;
                             bestTarget = enemy;
                             foundInRing = true;
                         }
@@ -388,21 +454,32 @@ window.findNearestEnemyInGrid = function(warrior) {
         // Apenas considera se estiver num raio razoável (ex: 100 metros)
         if (distSq > 10000) continue; 
         
-        const isOccupied = (cat.attackers && cat.attackers.size >= 3 && !cat.attackers.has(warrior));
+        const atkSize = cat.attackers ? cat.attackers.size : 0;
+        if (atkSize >= 6 && !cat.attackers.has(warrior)) {
+            const score = distSq * (1 + (atkSize - 5) * 0.8);
+            if (score < lastResortScore) {
+                lastResortScore = score;
+                lastResortTarget = cat;
+            }
+            continue;
+        }
+        const isOccupied = (atkSize >= 3 && !cat.attackers.has(warrior));
         if (isOccupied) {
-            if (distSq < bestOccupiedDistSq) {
-                bestOccupiedDistSq = distSq;
+            const score = distSq * (1 + (atkSize - 2) * 0.6);
+            if (score < bestOccupiedScore) {
+                bestOccupiedScore = score;
                 bestOccupiedTarget = cat;
             }
         } else {
-            if (distSq < bestDistSq) {
-                bestDistSq = distSq;
+            const score = distSq * (1 + atkSize * 0.35);
+            if (score < bestScore) {
+                bestScore = score;
                 bestTarget = cat;
             }
         }
     }
 
-    return bestTarget || bestOccupiedTarget;
+    return bestTarget || bestOccupiedTarget || lastResortTarget;
 };
 
 const _catapultHasTargetMap = new Map();

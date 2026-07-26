@@ -617,6 +617,7 @@ const CONFIG = {
     UNITS_BASE_GROUP_SPACING: 60,
     UNITS_ARCHER_GAP: 5.0,
     UNITS_CATAPULT_GAP: 8.0,
+    MAX_CORPSES: 1500, // Limite de cadáveres renderizados; os mais antigos são reciclados
 
     // Catapults
     CATAPULT_MAX: 8,

@@ -14,6 +14,10 @@ const imAllocator = {
         const im = new THREE.InstancedMesh(geometry, material, 15000);
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         im.count = 0;
+        // Flags de sujeira por IM: evita needsUpdate (re-upload do buffer inteiro)
+        // em frames onde nenhuma matriz/cor foi efetivamente alterada
+        im.userData.matrixDirty = false;
+        im.userData.colorDirty = false;
         scene.add(im);
         this.meshes.push(im);
         return im;
@@ -25,14 +29,19 @@ const imAllocator = {
     },
     updateMatrices: function () {
         for (let i = 0; i < this.meshes.length; i++) {
-            if (this.meshes[i].count > 0) {
-                if (window.PerformanceProfiler) window.PerformanceProfiler.start('needs_update');
-                this.meshes[i].instanceMatrix.needsUpdate = true;
-                if (this.meshes[i].instanceColor) {
-                    this.meshes[i].instanceColor.needsUpdate = true;
+            const im = this.meshes[i];
+            if (im.count > 0) {
+                if (im.userData.matrixDirty) {
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('needs_update');
+                    im.instanceMatrix.needsUpdate = true;
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('needs_update');
                 }
-                if (window.PerformanceProfiler) window.PerformanceProfiler.end('needs_update');
+                if (im.userData.colorDirty && im.instanceColor) {
+                    im.instanceColor.needsUpdate = true;
+                }
             }
+            im.userData.matrixDirty = false;
+            im.userData.colorDirty = false;
         }
     }
 };
@@ -57,7 +66,7 @@ function renderList(list) {
     const len = list.length;
     for (let i = 0; i < len; i++) {
         const w = list[i];
-        const isWarrior = (w.constructor.name === 'Warrior');
+        const isWarrior = (w.isWarrior === true);
         
         let mesh = isWarrior ? w.dummy : w.mesh;
         let pos = isWarrior ? w : w.mesh.position;
@@ -103,23 +112,32 @@ function renderList(list) {
                 if (window.PerformanceProfiler) window.PerformanceProfiler.start('posicao');
                 mesh.position.set(w.x, w.y, w.z);
                 if (window.PerformanceProfiler) window.PerformanceProfiler.end('posicao');
-                
+
                 if (window.PerformanceProfiler) window.PerformanceProfiler.start('rotacao');
                 mesh.rotation.set(w.rotX || 0, w.rotY || 0, w.rotZ || 0);
                 if (window.PerformanceProfiler) window.PerformanceProfiler.end('rotacao');
-                
+
                 mesh.scale.set(w.scale || 1, w.scale || 1, w.scale || 1);
-                
+
                 if (!useMergedOptimization) {
                     if (window.PerformanceProfiler) window.PerformanceProfiler.start('animacoes_visuais');
                     w.applyPoseToDummy(mesh);
                     if (window.PerformanceProfiler) window.PerformanceProfiler.end('animacoes_visuais');
+
+                    // Não-merged: submeshes renderizam via child.matrixWorld — atualização completa
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('update_matrix');
+                    mesh.updateMatrixWorld(true);
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('update_matrix');
+                } else {
+                    // Merged: o dummy nunca entra na cena (sem parent) e as poses vêm pré-assadas
+                    // na geometria animada — as matrizes dos filhos nunca são lidas.
+                    // matrixWorld == matriz local, sem tocar na subárvore.
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.start('update_matrix');
+                    mesh.updateMatrix();
+                    mesh.matrixWorld.copy(mesh.matrix);
+                    if (window.PerformanceProfiler) window.PerformanceProfiler.end('update_matrix');
                 }
-                
-                if (window.PerformanceProfiler) window.PerformanceProfiler.start('update_matrix');
-                mesh.updateMatrixWorld(true);
-                if (window.PerformanceProfiler) window.PerformanceProfiler.end('update_matrix');
-                
+
                 w.matrixDirty = false;
                 w.positionDirty = false;
                 w.rotationDirty = false;
@@ -181,6 +199,7 @@ function renderList(list) {
                     } else {
                         if (window.PerformanceProfiler) window.PerformanceProfiler.start('set_matrix_at');
                         im.setMatrixAt(idx, w.dummy.matrixWorld);
+                        im.userData.matrixDirty = true;
                         if (window.PerformanceProfiler) window.PerformanceProfiler.end('set_matrix_at');
                     }
 
@@ -214,7 +233,7 @@ function renderList(list) {
                         if (window.RenderOptimizationStats) window.RenderOptimizationStats.colorUpdatesSaved++;
                     } else {
                         im.instanceColor.setXYZ(idx, _tmpColorIM.r, _tmpColorIM.g, _tmpColorIM.b);
-                        im.instanceColor.needsUpdate = true;
+                        im.userData.colorDirty = true;
                     }
                     if (window.PerformanceProfiler) window.PerformanceProfiler.end('cores');
 
@@ -234,10 +253,14 @@ function renderList(list) {
             else w.subMeshes = subMeshes;
         }
 
-        let subMeshesToRender = [];
+        let subMeshesToRender;
         if (isWarrior) {
             if (!w.visibleSubMeshes || w.lodDirty || w.visibilityDirty) {
-                w.visibleSubMeshes = [];
+                if (!w.visibleSubMeshes) {
+                    w.visibleSubMeshes = [];
+                } else {
+                    w.visibleSubMeshes.length = 0; // Reutiliza o array cacheado, sem alocação por frame
+                }
                 const subLen = subMeshes.length;
                 for (let m = 0; m < subLen; m++) {
                     const child = subMeshes[m];
@@ -254,6 +277,7 @@ function renderList(list) {
             }
             subMeshesToRender = w.visibleSubMeshes;
         } else {
+            subMeshesToRender = [];
             const subLen = subMeshes.length;
             for (let m = 0; m < subLen; m++) {
                 if (subMeshes[m].visible) {
@@ -323,6 +347,7 @@ function renderList(list) {
             } else {
                 if (window.PerformanceProfiler) window.PerformanceProfiler.start('set_matrix_at');
                 im.setMatrixAt(idx, child.matrixWorld);
+                im.userData.matrixDirty = true;
                 if (window.PerformanceProfiler) window.PerformanceProfiler.end('set_matrix_at');
             }
 
@@ -356,6 +381,7 @@ function renderList(list) {
                 if (window.RenderOptimizationStats) window.RenderOptimizationStats.colorUpdatesSaved++;
             } else {
                 im.setColorAt(idx, _tmpColorIM);
+                im.userData.colorDirty = true;
             }
             if (window.PerformanceProfiler) window.PerformanceProfiler.end('cores');
             
@@ -414,6 +440,7 @@ function renderParticles() {
             if (idx >= im.instanceMatrix.count) continue;
 
             im.setMatrixAt(idx, child.matrixWorld);
+            im.userData.matrixDirty = true;
 
             if (!im.instanceColor) {
                 const colors = new Float32Array(im.instanceMatrix.count * 3);
@@ -430,6 +457,7 @@ function renderParticles() {
                 _tmpColorIM.setHex(0xffffff);
             }
             im.setColorAt(idx, _tmpColorIM);
+            im.userData.colorDirty = true;
             im.count++;
         }
     }
@@ -645,6 +673,13 @@ function animate() {
                 boulders.splice(i, 1);
             }
             if (window.PerformanceProfiler) window.PerformanceProfiler.end('projeteis');
+        }
+
+        // Flush dos contadores do HUD: no máximo 1x por frame, por mais mortes que tenham ocorrido
+        if (window.hudCountersDirty) {
+            window.hudCountersDirty = false;
+            HUD.updateKills(battleManager.getKills());
+            HUD.updateArmyCounts(battleManager.getKnights().length, battleManager.getGoblins().length);
         }
     }
 

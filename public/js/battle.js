@@ -35,7 +35,10 @@ function spawnCatapults() {
             const p2 = new Warrior(faction, 'melee', catX + dir * xOff, zOff + CONFIG.CATAPULT_PUSHER_Z_OFFSET, true, cat);
             if (isNapoleonicTheme()) p1.hasTorch = true;
             cat.pushers = [p1, p2];
-            window.armies[faction].list.push(p1, p2);
+            const pusherList = window.armies[faction].list;
+            p1._armyIndex = pusherList.length;
+            p2._armyIndex = pusherList.length + 1;
+            pusherList.push(p1, p2);
         }
     };
     
@@ -611,7 +614,9 @@ function spawnFormation(faction, role, count, startX, dir, startXOffset, zBase, 
         if (aiFormation) {
             aiFormation.addSoldier(w);
         }
-        window.armies[faction].list.push(w);
+        const armyList = window.armies[faction].list;
+        w._armyIndex = armyList.length;
+        armyList.push(w);
     }
     return depth;
 }
