@@ -133,7 +133,7 @@ class Warrior {
         this.faction = faction;
         this.role = role;
         this.isPusher = isPusher;
-        this.isFlanker = (role === 'melee' && !isPusher && Math.random() < flankRatio);
+        this.isFlanker = false;
         this.catapult = catapult;
         this.id = faction + "_" + role + "_" + Math.floor(Math.random() * 100000);
 
@@ -1468,19 +1468,41 @@ class Warrior {
                 }
             } else if (this.isFlanker) {
                 this.currentState = 'FLANKING';
-                // dirX marca o LADO de spawn (battle.js usa dirX para posicionar o exército); o avanço é na direção oposta
                 const dirX = -window.armies[this.faction].dirX;
                 const flankDirZ = (this.uid % 2 === 0) ? 1.0 : -1.0;
-                // Deriva lateral só até a faixa do flanco; depois marcha reto (e mais rápido)
-                const lane = this.flankLane || 120;
-                let vx = dirX * this.speed * 0.7;
-                let vz = flankDirZ * this.speed * 0.7;
-                if ((flankDirZ > 0 && this.z >= lane) || (flankDirZ < 0 && this.z <= -lane)) {
-                    vz = 0;
-                    vx = dirX * this.speed;
+                
+                // Se ainda está longe do confronto principal, avança junto com a formação principal em X
+                let isNearBattleFront = false;
+                if (opponents && opponents.length > 0) {
+                    let minEnemyX = dirX > 0 ? Infinity : -Infinity;
+                    for (let i = 0; i < opponents.length; i++) {
+                        const e = opponents[i];
+                        if (e && !e.isDead) {
+                            if (dirX > 0 && e.x < minEnemyX) minEnemyX = e.x;
+                            if (dirX < 0 && e.x > minEnemyX) minEnemyX = e.x;
+                        }
+                    }
+                    if (isFinite(minEnemyX)) {
+                        const distToFrontX = Math.abs(minEnemyX - this.x);
+                        if (distToFrontX < 120) isNearBattleFront = true;
+                    }
                 }
+
+                const lane = this.flankLane || 120;
+                let vx = dirX * this.speed;
+                let vz = 0;
+
+                if (isNearBattleFront) {
+                    vx = dirX * this.speed * 0.8;
+                    vz = flankDirZ * this.speed * 0.9;
+                    if ((flankDirZ > 0 && this.z >= lane) || (flankDirZ < 0 && this.z <= -lane)) {
+                        vz = 0;
+                        vx = dirX * this.speed * 1.1;
+                    }
+                }
+
                 this.lastVelocity.set(vx, 0, vz);
-                this.lastTargetAngle = Math.atan2(this.lastVelocity.x, this.lastVelocity.z);
+                this.lastTargetAngle = Math.atan2(vx, vz) + Math.PI;
                 this.isTryingToMove = true;
             } else {
                 this.currentState = 'ADVANCING';
@@ -1747,19 +1769,40 @@ class Warrior {
                 }
             } else if (this.isFlanker) {
                 this.currentState = 'FLANKING';
-                // dirX marca o LADO de spawn (battle.js usa dirX para posicionar o exército); o avanço é na direção oposta
                 const dirX = -window.armies[this.faction].dirX;
                 const flankDirZ = (this.uid % 2 === 0) ? 1.0 : -1.0;
-                // Deriva lateral só até a faixa do flanco; depois marcha reto (e mais rápido)
-                const lane = this.flankLane || 120;
-                let vx = dirX * this.speed * 0.7;
-                let vz = flankDirZ * this.speed * 0.7;
-                if ((flankDirZ > 0 && this.z >= lane) || (flankDirZ < 0 && this.z <= -lane)) {
-                    vz = 0;
-                    vx = dirX * this.speed;
+                
+                let isNearBattleFront = false;
+                if (opponents && opponents.length > 0) {
+                    let minEnemyX = dirX > 0 ? Infinity : -Infinity;
+                    for (let i = 0; i < opponents.length; i++) {
+                        const e = opponents[i];
+                        if (e && !e.isDead) {
+                            if (dirX > 0 && e.x < minEnemyX) minEnemyX = e.x;
+                            if (dirX < 0 && e.x > minEnemyX) minEnemyX = e.x;
+                        }
+                    }
+                    if (isFinite(minEnemyX)) {
+                        const distToFrontX = Math.abs(minEnemyX - this.x);
+                        if (distToFrontX < 120) isNearBattleFront = true;
+                    }
                 }
+
+                const lane = this.flankLane || 120;
+                let vx = dirX * this.speed;
+                let vz = 0;
+
+                if (isNearBattleFront) {
+                    vx = dirX * this.speed * 0.8;
+                    vz = flankDirZ * this.speed * 0.9;
+                    if ((flankDirZ > 0 && this.z >= lane) || (flankDirZ < 0 && this.z <= -lane)) {
+                        vz = 0;
+                        vx = dirX * this.speed * 1.1;
+                    }
+                }
+
                 this.lastVelocity.set(vx, 0, vz);
-                this.lastTargetAngle = Math.atan2(this.lastVelocity.x, this.lastVelocity.z);
+                this.lastTargetAngle = Math.atan2(vx, vz) + Math.PI;
                 this.isTryingToMove = true;
             } else {
                 this.currentState = 'ADVANCING';

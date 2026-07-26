@@ -513,7 +513,7 @@ let cameraMode = 'orbit';
 let cinematicTime = 0;
 let cinematicZoomPauseTimer = 0;
 let archerRatio = 0.2;
-let flankRatio = 0.35;
+let flankRatio = 0;
 let numCloudsSetting = 0;
 window.panelVisible = true;
 // Painéis de instrumentação (PerformanceProfiler + CombatProfiler) começam OCULTOS.

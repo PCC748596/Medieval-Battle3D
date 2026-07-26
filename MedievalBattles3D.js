@@ -2753,7 +2753,7 @@ class Warrior {
         this.faction = faction;
         this.role = role;
         this.isPusher = isPusher;
-        this.isFlanker = (role === 'melee' && !isPusher && Math.random() < flankRatio);
+        this.isFlanker = false;
         this.catapult = catapult;
         this.id = faction + "_" + role + "_" + Math.floor(Math.random() * 100000);
 
@@ -3736,9 +3736,11 @@ class Warrior {
                 }
                 if (this.isFlanker) {
                     if (enemy.role !== 'melee') {
-                        score -= 1000000; // Prioriza ataque a longo alcance
-                    } else if (dSq < 2500) {
-                        score -= 3000000; // Prioriza se defender/lutar com quem estiver no caminho (raio de 50 unidades)
+                        score -= 1000000; // Prioriza arqueiros/unidades de retaguarda
+                    } else if (dSq < 36) {
+                        score -= 3000000; // Autodefesa se guerreiro colado (≤6m)
+                    } else {
+                        score += 5000000; // Ignora guerreiros de corpo a corpo para manter o contorno
                     }
                 }
 
