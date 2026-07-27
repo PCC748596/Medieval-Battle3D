@@ -1424,12 +1424,25 @@ class Warrior {
             return;
         }
 
-        // WAITING state periodically checks if it should re-evaluate blocked status
-        if (this.currentState === 'WAITING') {
-            const waitingCheckFreq = this.lodLevel >= 2 ? 48 : 12; // ~200-300ms
-            if (this.aiTick % waitingCheckFreq === 0) {
-                this.stateDirty = true;
+        const brigada = (this.formation && this.formation.brigada) ? this.formation.brigada : (this.brigada || null);
+        const isPlayer = (this.faction === 'knights');
+        const order = brigada ? brigada.order : (isPlayer ? 'WAIT' : 'ADVANCE');
+        if (order === 'WAIT') {
+            if (this.target && !this.target.isDead) {
+                const dx = getTargetX(this.target) - this.x;
+                const dz = getTargetZ(this.target) - this.z;
+                const distSq = dx * dx + dz * dz;
+                const targetRadius = this.target.radius || 0.8;
+                const isMeleeCombatant = (this.role === 'melee' || this.isDaggerArcher);
+                const actualAttackRange = isMeleeCombatant ? (this.attackRange - 0.8 + targetRadius) : this.attackRange;
+                if (distSq <= actualAttackRange * actualAttackRange) {
+                    this.currentState = 'FIGHTING';
+                    this.lastVelocity.set(0, 0, 0);
+                    this.stopAndAttack(simSpeed);
+                    return;
+                }
             }
+            this.currentState = 'WAITING';
             this.lastVelocity.set(0, 0, 0);
             this.isTryingToMove = false;
             return;
@@ -1439,21 +1452,7 @@ class Warrior {
         if (!this.target || this.target.isDead) {
             this.setTarget(null);
             this.isAttacking = false;
-            
-            const order = (this.formation && this.formation.brigada) ? this.formation.brigada.order : 'ADVANCE';
-            if (order === 'WAIT') {
-                this.currentState = 'WAITING';
-                this.lastVelocity.set(0, 0, 0);
-                this.isTryingToMove = false;
-                
-                const targetSearchFreq = this.lodLevel >= 2 ? 48 : 12;
-                if (this.aiTick % targetSearchFreq === 0) {
-                    this.stateDirty = true;
-                }
-                return;
-            }
 
-            // Busca novo alvo a cada freq reduzida se estiver avançando/flanqueando
             const targetSearchFreq = this.lodLevel >= 2 ? 48 : 12;
             if (this.aiTick % targetSearchFreq === 0) {
                 this.stateDirty = true;
@@ -1484,7 +1483,6 @@ class Warrior {
                 const dirX = -window.armies[this.faction].dirX;
                 const flankDirZ = (this.uid % 2 === 0) ? 1.0 : -1.0;
                 
-                // Se ainda está longe do confronto principal, avança junto com a formação principal em X
                 let isNearBattleFront = false;
                 if (opponents && opponents.length > 0) {
                     let minEnemyX = dirX > 0 ? Infinity : -Infinity;
@@ -1518,18 +1516,14 @@ class Warrior {
                 this.lastTargetAngle = Math.atan2(vx, vz) + Math.PI;
                 this.isTryingToMove = true;
             } else {
-                this.currentState = 'ADVANCING';
-                // dirX marca o LADO de spawn (battle.js usa dirX para posicionar o exército); o avanço é na direção oposta
-                const dirX = -window.armies[this.faction].dirX;
-                this.lastVelocity.set(dirX * this.speed, 0, 0);
-                this.lastTargetAngle = Math.atan2(dirX, 0) + Math.PI;
-                this.isTryingToMove = true;
+                this.currentState = 'WAITING';
+                this.lastVelocity.set(0, 0, 0);
+                this.isTryingToMove = false;
             }
             return;
         }
 
         // Temos alvo vivo e válido!
-        // Checagem de proximidade imediata: se houver um inimigo MUITO MAIS PRÓXIMO na frente (< 6m) do que o nosso alvo atual (> 10m), troca para ele imediatamente!
         if (window.findNearestEnemyInGrid && (this.role === 'melee' || this.isDaggerArcher)) {
             const closeEnemy = window.findNearestEnemyInGrid(this);
             if (closeEnemy && closeEnemy !== this.target) {
@@ -1539,7 +1533,7 @@ class Warrior {
                 const curDx = getTargetX(this.target) - this.x;
                 const curDz = getTargetZ(this.target) - this.z;
                 const curDistSq = curDx * curDx + curDz * curDz;
-                if (cDistSq < 36 && curDistSq > 100) { // Inimigo próximo a <6m e alvo atual a >10m
+                if (cDistSq < 36 && curDistSq > 100) {
                     this.setTarget(closeEnemy);
                     this.stateDirty = true;
                     return;
@@ -1572,7 +1566,6 @@ class Warrior {
         
         const actualAttackRangeSq = actualAttackRange * actualAttackRange;
 
-        // Reprocessamento preventivo ocasional de desvios e rotas
         const reevaluateFreq = this.lodLevel >= 2 ? 48 : 24;
         if (this.aiTick % reevaluateFreq === 0) {
             this.stateDirty = true;
@@ -1581,19 +1574,16 @@ class Warrior {
 
         if (isMeleeCombatant) {
             if (distSq > actualAttackRangeSq) {
-                // --- EVENTO: Alvo saiu do alcance ---
                 if (this.currentState === 'FIGHTING') {
                     this.stateDirty = true;
                     return;
                 }
                 this.currentState = 'MOVING';
-                // Cálculo de velocidade direto super leve, sem os custos do desvio de obstáculos contínuo!
                 let dir = _tmpVec3A.set(dx, 0, dz).normalize();
                 this.lastVelocity.set(dir.x * this.speed, 0, dir.z * this.speed);
                 this.lastTargetAngle = Math.atan2(dx, dz) + Math.PI;
                 this.isTryingToMove = true;
             } else {
-                // --- EVENTO: Chegou ao destino ---
                 if (this.currentState !== 'FIGHTING') {
                     this.stateDirty = true;
                     return;
@@ -1602,7 +1592,6 @@ class Warrior {
                 this.isTryingToMove = false;
             }
         } else {
-            // Atiradores/Arqueiros
             const keepDistSq = this.keepDistanceRange * this.keepDistanceRange;
             if (distSq < keepDistSq) {
                 if (this.currentState === 'FIGHTING') {
@@ -1710,10 +1699,37 @@ class Warrior {
         this.isTryingToMove = false;
         this.isKiting = false;
 
-        // Verifica se o alvo é válido e está vivo
-        if (window.CombatProfiler) window.CombatProfiler.start('validação do alvo atual');
         const hasValidTarget = (this.target && !this.target.isDead);
         if (window.CombatProfiler) window.CombatProfiler.end('validação do alvo atual');
+        const brigada = (this.formation && this.formation.brigada) ? this.formation.brigada : (this.brigada || null);
+        const isPlayer = (this.faction === 'knights');
+        const order = brigada ? brigada.order : (isPlayer ? 'WAIT' : 'ADVANCE');
+
+        // Se a unidade está sem ordem (order === 'WAIT'), ela NÃO DEVE marchar atrás de alvos distantes!
+        if (order === 'WAIT') {
+            if (hasValidTarget) {
+                const dx = getTargetX(this.target) - this.x;
+                const dz = getTargetZ(this.target) - this.z;
+                const distSq = dx * dx + dz * dz;
+                const targetRadius = this.target.radius || 0.8;
+                const isMeleeCombatant = (this.role === 'melee' || this.isDaggerArcher);
+                const actualAttackRange = isMeleeCombatant ? (this.attackRange - 0.8 + targetRadius) : this.attackRange;
+                const actualAttackRangeSq = actualAttackRange * actualAttackRange;
+
+                if (distSq <= actualAttackRangeSq) {
+                    this.currentState = 'FIGHTING';
+                    this.lastVelocity.set(0, 0, 0);
+                    this.stopAndAttack(simSpeed);
+                    resolveLogCollisions(this);
+                    return true;
+                }
+            }
+            this.currentState = 'WAITING';
+            this.lastVelocity.set(0, 0, 0);
+            this.isTryingToMove = false;
+            resolveLogCollisions(this);
+            return true;
+        }
 
         if (hasValidTarget) {
             if (window.CombatProfiler) window.CombatProfiler.start('cálculo de distância');
@@ -1762,11 +1778,13 @@ class Warrior {
             this.setTarget(null);
             this.isAttacking = false;
             
-            const order = (this.formation && this.formation.brigada) ? this.formation.brigada.order : 'ADVANCE';
+            const order = (this.formation && this.formation.brigada) ? this.formation.brigada.order : 'WAIT';
             if (order === 'WAIT') {
                 this.currentState = 'WAITING';
                 this.lastVelocity.set(0, 0, 0);
                 this.isTryingToMove = false;
+                resolveLogCollisions(this);
+                return true;
             } else if (this.formationTarget) {
                 this.currentState = 'ADVANCING';
                 const dx = this.formationTarget.x - this.x;
@@ -1824,12 +1842,9 @@ class Warrior {
                 this.lastTargetAngle = Math.atan2(vx, vz) + Math.PI;
                 this.isTryingToMove = true;
             } else {
-                this.currentState = 'ADVANCING';
-                // dirX marca o LADO de spawn (battle.js usa dirX para posicionar o exército); o avanço é na direção oposta
-                const dirX = -window.armies[this.faction].dirX;
-                this.lastVelocity.set(dirX * this.speed, 0, 0);
-                this.lastTargetAngle = Math.atan2(dirX, 0) + Math.PI;
-                this.isTryingToMove = true;
+                this.currentState = 'WAITING';
+                this.lastVelocity.set(0, 0, 0);
+                this.isTryingToMove = false;
             }
         }
 

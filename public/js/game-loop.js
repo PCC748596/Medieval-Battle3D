@@ -504,10 +504,11 @@ const _dummyCircle = new THREE.Object3D();
 
 let tacticalArrowMesh = null;
 
-window.updateTacticalArrow = function(origin, target, colorHex = 0x3b82f6, shaftWidth = 3.6, headWidth = 7.2, headLength = 9.0) {
-    if (!origin || !target) return;
-    
-    if (!tacticalArrowMesh) {
+const brigadePathMeshMap = new Map();
+
+function getOrCreateBrigadePathMesh(id, colorHex) {
+    let mesh = brigadePathMeshMap.get(id);
+    if (!mesh) {
         const mat = new THREE.MeshBasicMaterial({
             color: colorHex,
             side: THREE.DoubleSide,
@@ -515,99 +516,217 @@ window.updateTacticalArrow = function(origin, target, colorHex = 0x3b82f6, shaft
             opacity: 0.85,
             depthWrite: false
         });
-        const geo = new THREE.BufferGeometry();
-        tacticalArrowMesh = new THREE.Mesh(geo, mat);
-        tacticalArrowMesh.renderOrder = 999;
-        scene.add(tacticalArrowMesh);
+        mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
+        mesh.renderOrder = 999;
+        scene.add(mesh);
+        brigadePathMeshMap.set(id, mesh);
+    }
+    mesh.material.color.setHex(colorHex);
+    return mesh;
+}
+
+window.buildCurvedArrowGeometry = function(rawPoints, shaftWidth = 3.6, headWidth = 7.2, headLength = 9.0) {
+    if (!rawPoints || rawPoints.length < 2) return null;
+    
+    const points = [rawPoints[0].clone()];
+    for (let i = 1; i < rawPoints.length; i++) {
+        if (points[points.length - 1].distanceTo(rawPoints[i]) >= 0.8) {
+            points.push(rawPoints[i].clone());
+        }
+    }
+    if (points.length < 2) return null;
+    
+    const cumDist = [0];
+    let totalLen = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+        const d = points[i].distanceTo(points[i + 1]);
+        totalLen += d;
+        cumDist.push(totalLen);
     }
     
-    tacticalArrowMesh.material.color.setHex(colorHex);
+    if (totalLen < 2.0) return null;
     
-    const dist = Math.hypot(target.x - origin.x, target.z - origin.z);
-    if (dist < 2.0) {
-        tacticalArrowMesh.visible = false;
-        return;
+    const actualHeadLength = Math.min(headLength, totalLen * 0.45);
+    const shaftLen = totalLen - actualHeadLength;
+    
+    const shaftSegments = Math.max(2, Math.floor(shaftLen / 2.5));
+    const shaftPoints = [];
+    const shaftDirs = [];
+    
+    for (let i = 0; i <= shaftSegments; i++) {
+        const targetD = (i / shaftSegments) * shaftLen;
+        
+        let segIdx = 0;
+        while (segIdx < cumDist.length - 1 && cumDist[segIdx + 1] < targetD) {
+            segIdx++;
+        }
+        
+        const pA = points[segIdx];
+        const pB = points[segIdx + 1] || points[segIdx];
+        const segLen = pA.distanceTo(pB) || 0.001;
+        const alpha = Math.max(0, Math.min(1, (targetD - cumDist[segIdx]) / segLen));
+        
+        const pt = new THREE.Vector3().lerpVectors(pA, pB, alpha);
+        const dir = new THREE.Vector3().subVectors(pB, pA).normalize();
+        if (dir.lengthSq() < 0.001) dir.set(0, 0, 1);
+        
+        shaftPoints.push(pt);
+        shaftDirs.push(dir);
     }
     
-    const dx = (target.x - origin.x) / dist;
-    const dz = (target.z - origin.z) / dist;
-    const px = -dz;
-    const pz = dx;
-    
-    const actualHeadLength = Math.min(headLength, dist * 0.45);
-    const shaftLength = dist - actualHeadLength;
-    
-    const segments = Math.max(4, Math.floor(shaftLength / 10.0));
     const vertices = [];
     const uvs = [];
+    const indices = [];
     
-    for (let i = 0; i <= segments; i++) {
-        const t = i / segments;
-        const curDist = t * shaftLength;
-        const cx = origin.x + dx * curDist;
-        const cz = origin.z + dz * curDist;
+    for (let i = 0; i < shaftPoints.length; i++) {
+        const pt = shaftPoints[i];
+        const dir = shaftDirs[i];
+        const px = -dir.z;
+        const pz = dir.x;
         
-        const lx = cx - px * (shaftWidth * 0.5);
-        const lz = cz - pz * (shaftWidth * 0.5);
-        const rx = cx + px * (shaftWidth * 0.5);
-        const rz = cz + pz * (shaftWidth * 0.5);
+        const lx = pt.x - px * (shaftWidth * 0.5);
+        const lz = pt.z - pz * (shaftWidth * 0.5);
+        const rx = pt.x + px * (shaftWidth * 0.5);
+        const rz = pt.z + pz * (shaftWidth * 0.5);
         
-        const ly = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(lx, lz) : origin.y) + 0.35;
-        const ry = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(rx, rz) : origin.y) + 0.35;
+        const ly = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(lx, lz) : pt.y) + 0.35;
+        const ry = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(rx, rz) : pt.y) + 0.35;
         
         vertices.push(lx, ly, lz);
         vertices.push(rx, ry, rz);
+        const t = i / (shaftPoints.length - 1);
         uvs.push(0, t);
         uvs.push(1, t);
     }
     
-    const baseCx = origin.x + dx * shaftLength;
-    const baseCz = origin.z + dz * shaftLength;
-    
-    const headLx = baseCx - px * (headWidth * 0.5);
-    const headLz = baseCz - pz * (headWidth * 0.5);
-    const headRx = baseCx + px * (headWidth * 0.5);
-    const headRz = baseCz + pz * (headWidth * 0.5);
-    
-    const headLy = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(headLx, headLz) : origin.y) + 0.35;
-    const headRy = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(headRx, headRz) : origin.y) + 0.35;
-    
-    const tipX = target.x;
-    const tipZ = target.z;
-    const tipY = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(tipX, tipZ) : target.y) + 0.35;
-    
-    const indices = [];
-    for (let i = 0; i < segments; i++) {
+    for (let i = 0; i < shaftPoints.length - 1; i++) {
         const v = i * 2;
         indices.push(v, v + 1, v + 2);
         indices.push(v + 1, v + 3, v + 2);
     }
     
-    const headStartIdx = (segments + 1) * 2;
+    const lastShaftPt = shaftPoints[shaftPoints.length - 1];
+    const lastShaftDir = shaftDirs[shaftDirs.length - 1];
+    const headPx = -lastShaftDir.z;
+    const headPz = lastShaftDir.x;
+    
+    const headLx = lastShaftPt.x - headPx * (headWidth * 0.5);
+    const headLz = lastShaftPt.z - headPz * (headWidth * 0.5);
+    const headRx = lastShaftPt.x + headPx * (headWidth * 0.5);
+    const headRz = lastShaftPt.z + headPz * (headWidth * 0.5);
+    
+    const headLy = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(headLx, headLz) : lastShaftPt.y) + 0.35;
+    const headRy = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(headRx, headRz) : lastShaftPt.y) + 0.35;
+    
+    const tip = points[points.length - 1];
+    const tipY = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(tip.x, tip.z) : tip.y) + 0.35;
+    
+    const headStartIdx = shaftPoints.length * 2;
     vertices.push(headLx, headLy, headLz);
     vertices.push(headRx, headRy, headRz);
-    vertices.push(tipX, tipY, tipZ);
+    vertices.push(tip.x, tipY, tip.z);
     uvs.push(0, 1);
     uvs.push(1, 1);
     uvs.push(0.5, 1.2);
     
     indices.push(headStartIdx, headStartIdx + 1, headStartIdx + 2);
     
-    const oldGeo = tacticalArrowMesh.geometry;
-    tacticalArrowMesh.geometry = new THREE.BufferGeometry();
-    tacticalArrowMesh.geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    tacticalArrowMesh.geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    tacticalArrowMesh.geometry.setIndex(indices);
-    tacticalArrowMesh.geometry.computeVertexNormals();
-    if (oldGeo) oldGeo.dispose();
-    
-    tacticalArrowMesh.visible = true;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    return geo;
+};
+
+window.renderAllBrigadePaths = function() {
+    brigadePathMeshMap.forEach(mesh => {
+        mesh.visible = false;
+    });
+
+    if (!window.AICommanderSystem) return;
+
+    // Renderizar APENAS setas das brigadas do jogador (cavaleiros)
+    const playerBrigades = window.AICommanderSystem.knightGeneral.brigades;
+
+    for (const b of playerBrigades) {
+        if (b.getAliveSoldiers() === 0 || b.state === 'FLEEING' || b.state === 'DESTROYED') continue;
+
+        let pathPoints = null;
+
+        // Renderizar APENAS caminhos criados pelo jogador (drag/setas)
+        if (b.order === 'MOVE_TO' && b.pathWaypoints && b.pathWaypoints.length >= 1) {
+            const origin = window.getBrigadeCenter(b);
+            let idx = b.currentWaypointIndex || 0;
+            
+            // Avança idx sempre que a posição atual do grupo estiver mais próxima do próximo waypoint
+            while (idx < b.pathWaypoints.length - 1) {
+                const distCurrent = origin.distanceTo(b.pathWaypoints[idx]);
+                const distNext = origin.distanceTo(b.pathWaypoints[idx + 1]);
+                if (distNext <= distCurrent || distCurrent < 6.0) {
+                    idx++;
+                } else {
+                    break;
+                }
+            }
+            
+            b.currentWaypointIndex = idx;
+            const remainingWps = b.pathWaypoints.slice(idx);
+            if (remainingWps.length > 0) {
+                pathPoints = [origin, ...remainingWps];
+            }
+        } else if (b.order === 'MOVE_TO' && b.customDestination) {
+            const origin = window.getBrigadeCenter(b);
+            if (origin.distanceTo(b.customDestination) > 3.0) {
+                pathPoints = [origin, b.customDestination];
+            }
+        }
+
+        if (pathPoints && pathPoints.length >= 2) {
+            const isSelected = window.selectedBrigadeId === b.id;
+            const darkColor = isSelected ? 0x1d4ed8 : 0x1e3a8a;
+            
+            const geo = window.buildCurvedArrowGeometry(pathPoints, 3.8, 7.6, 9.5);
+            if (geo) {
+                const mesh = getOrCreateBrigadePathMesh(b.id, darkColor);
+                if (mesh.geometry) mesh.geometry.dispose();
+                mesh.geometry = geo;
+                mesh.visible = true;
+            }
+        }
+    }
+
+    if (window.isDraggingPath && window.activeDragPath) {
+        const dragPoints = [...window.activeDragPath];
+        if (window.activeDragTarget && (dragPoints.length === 0 || dragPoints[dragPoints.length - 1].distanceTo(window.activeDragTarget) > 0.5)) {
+            dragPoints.push(window.activeDragTarget);
+        }
+        if (dragPoints.length >= 2) {
+            const geo = window.buildCurvedArrowGeometry(dragPoints, 4.2, 8.4, 10.0);
+            if (geo) {
+                const mesh = getOrCreateBrigadePathMesh('live_drag', 0x34d399);
+                if (mesh.geometry) mesh.geometry.dispose();
+                mesh.geometry = geo;
+                mesh.visible = true;
+            }
+        }
+    }
+};
+
+window.updateTacticalArrow = function(origin, target, colorHex = 0x3b82f6) {
+    if (!origin || !target) return;
+    const geo = window.buildCurvedArrowGeometry([origin, target], 3.8, 7.6, 9.5);
+    if (geo) {
+        const mesh = getOrCreateBrigadePathMesh('tactical_single', colorHex);
+        if (mesh.geometry) mesh.geometry.dispose();
+        mesh.geometry = geo;
+        mesh.visible = true;
+    }
 };
 
 window.hideTacticalArrow = function() {
-    if (tacticalArrowMesh) {
-        tacticalArrowMesh.visible = false;
-    }
+    const mesh = brigadePathMeshMap.get('tactical_single');
+    if (mesh) mesh.visible = false;
 };
 
 function renderSelectionMarker() {
@@ -642,6 +761,9 @@ function renderSelectionMarker() {
         selectionCatapultCirclesIM.visible = false;
         scene.add(selectionCatapultCirclesIM);
     }
+
+    // Renderizar todas as setas de percurso de todos os grupos
+    window.renderAllBrigadePaths();
 
     if (window.selectedBrigadeId && window.AICommanderSystem) {
         let brigade = window.AICommanderSystem.knightGeneral.brigades.find(b => b.id === window.selectedBrigadeId);
@@ -717,33 +839,12 @@ function renderSelectionMarker() {
             selectionCatapultCirclesIM.count = catCount;
             selectionCatapultCirclesIM.instanceMatrix.needsUpdate = true;
             selectionCatapultCirclesIM.visible = (catCount > 0);
-
-            if (!window.isDraggingPath) {
-                let targetPos = null;
-                if (brigade.order === 'MOVE_TO' && brigade.customDestination) {
-                    targetPos = brigade.customDestination;
-                } else if (brigade.flankWaypoint && !brigade.reachedFlankWaypoint) {
-                    targetPos = brigade.flankWaypoint;
-                } else if (brigade.targetBrigade) {
-                    targetPos = window.getBrigadeCenter ? window.getBrigadeCenter(brigade.targetBrigade) : null;
-                } else if (brigade.targetPosition) {
-                    targetPos = brigade.targetPosition;
-                }
-
-                const originPos = window.getBrigadeCenter ? window.getBrigadeCenter(brigade) : null;
-                if (originPos && targetPos && originPos.distanceTo(targetPos) > 3.0) {
-                    window.updateTacticalArrow(originPos, targetPos, colorHex);
-                } else {
-                    window.hideTacticalArrow();
-                }
-            }
             return;
         }
     }
     
     if (selectionCirclesIM) selectionCirclesIM.visible = false;
     if (selectionCatapultCirclesIM) selectionCatapultCirclesIM.visible = false;
-    if (!window.isDraggingPath) window.hideTacticalArrow();
 }
 
 function animate() {

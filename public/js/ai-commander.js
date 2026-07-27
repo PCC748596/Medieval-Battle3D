@@ -38,7 +38,13 @@ class Formacao {
         const perpX = -dirZ;
         const perpZ = dirX;
 
-        const center = this.centerPosition;
+        let anchorX = this.centerPosition.x;
+        let anchorZ = this.centerPosition.z;
+
+        if (this.brigada && this.brigada.order === 'MOVE_TO' && this.brigada.customDestination) {
+            anchorX = this.centerPosition.x + dirX * 4.0;
+            anchorZ = this.centerPosition.z + dirZ * 4.0;
+        }
 
         for (let i = 0; i < activeSoldiers.length; i++) {
             const s = activeSoldiers[i];
@@ -47,8 +53,8 @@ class Formacao {
             const colOffset = (col - (colsPerBlock - 1) / 2) * spacingZ;
             const rowOffset = row * spacingX;
 
-            const slotX = center.x + dirX * rowOffset + perpX * colOffset;
-            const slotZ = center.z + dirZ * rowOffset + perpZ * colOffset;
+            const slotX = anchorX + dirX * rowOffset + perpX * colOffset;
+            const slotZ = anchorZ + dirZ * rowOffset + perpZ * colOffset;
 
             if (!s.formationTarget) {
                 s.formationTarget = new THREE.Vector3();
@@ -100,7 +106,7 @@ class Brigada {
         this.targetPosition = new THREE.Vector3();
         this.targetBrigade = null;
         this.state = 'IDLE'; // IDLE, MARCHING, REPOSITIONING, PREPARING_COMBAT, COMBATING, PURSUE, REGROUPING, RETREATING, FLEEING, DESTROYED
-        this.order = 'ADVANCE'; // WAIT, ADVANCE, RETREAT, DEFEND, FLANK_LEFT, FLANK_RIGHT, BOMBARD, FOCUS_FIRE, REGROUP, PURSUE
+        this.order = 'WAIT'; // WAIT, ADVANCE, RETREAT, DEFEND, FLANK_LEFT, FLANK_RIGHT, BOMBARD, FOCUS_FIRE, REGROUP, PURSUE
         this.morale = 100;
         this.initialSoldierCount = 0;
         this.flankWaypoint = null;
@@ -193,12 +199,54 @@ class Brigada {
         }
 
         // Orientar a direção das formações com base no alvo / waypoints
-        if (this.order === 'MOVE_TO' && this.customDestination && this.formations.length > 0) {
+        if (this.order === 'MOVE_TO' && this.formations.length > 0) {
             const firstForm = this.formations[0];
             if (firstForm.centerPosition && firstForm.direction) {
-                const dir = _tmpVec3A.subVectors(this.customDestination, firstForm.centerPosition).normalize();
-                if (dir.lengthSq() > 0.001) {
-                    firstForm.direction.copy(dir);
+                if (this.pathWaypoints && this.pathWaypoints.length > 0) {
+                    if (this.currentWaypointIndex === undefined || this.currentWaypointIndex < 0) {
+                        this.currentWaypointIndex = 0;
+                    }
+                    let targetWp = this.pathWaypoints[this.currentWaypointIndex];
+                    
+                    while (targetWp && firstForm.centerPosition.distanceTo(targetWp) < 4.5) {
+                        this.currentWaypointIndex++;
+                        targetWp = this.pathWaypoints[this.currentWaypointIndex];
+                    }
+                    
+                    if (targetWp) {
+                        this.customDestination = targetWp;
+                        const dir = _tmpVec3A.subVectors(targetWp, firstForm.centerPosition).normalize();
+                        if (dir.lengthSq() > 0.001) {
+                            for (const f of this.formations) {
+                                f.direction.copy(dir);
+                            }
+                        }
+                    } else {
+                        this.order = 'WAIT';
+                        this.pathWaypoints = null;
+                        this.customDestination = null;
+                        for (const f of this.formations) {
+                            f.reorganizeSlots();
+                            for (const s of f.soldiers) {
+                                if (s && !s.isDead) {
+                                    s.stateDirty = true;
+                                    s.lastVelocity.set(0, 0, 0);
+                                    s.isTryingToMove = false;
+                                    s.currentState = 'WAITING';
+                                }
+                            }
+                        }
+                        if (window.HUD && window.HUD.updateBrigadeCardIcon) {
+                            window.HUD.updateBrigadeCardIcon(this.id, 'WAIT');
+                        }
+                    }
+                } else if (this.customDestination) {
+                    const dir = _tmpVec3A.subVectors(this.customDestination, firstForm.centerPosition).normalize();
+                    if (dir.lengthSq() > 0.001) {
+                        for (const f of this.formations) {
+                            f.direction.copy(dir);
+                        }
+                    }
                 }
             }
         } else if (this.targetBrigade && this.formations.length > 0) {
@@ -231,7 +279,9 @@ class Brigada {
 
         // Atualizar todas as formações
         for (const f of this.formations) {
-            f.update(now);
+            if (f && typeof f.update === 'function') {
+                f.update(now);
+            }
         }
     }
 }
@@ -379,8 +429,36 @@ window.setBrigadeMoveTo = function(brigadeId, tx, tz) {
     if (b) {
         b.order = 'MOVE_TO';
         b.customDestination = new THREE.Vector3(tx, 0, tz);
+        b.pathWaypoints = [b.customDestination];
+        b.currentWaypointIndex = 0;
         b.reachedFlankWaypoint = false;
         b.flankWaypoint = null;
+        if (window.HUD && window.HUD.updateBrigadeCardIcon) {
+            window.HUD.updateBrigadeCardIcon(b.id, 'MOVE_TO');
+        }
+    }
+};
+
+window.setBrigadeWaypoints = function(brigadeId, waypoints) {
+    const b = window.AICommanderSystem.knightGeneral.brigades.find(br => br.id === brigadeId);
+    if (b && waypoints && waypoints.length > 0) {
+        b.order = 'MOVE_TO';
+        b.pathWaypoints = waypoints;
+        b.currentWaypointIndex = 0;
+        b.customDestination = waypoints[0];
+        b.reachedFlankWaypoint = false;
+        b.flankWaypoint = null;
+
+        for (const f of b.formations) {
+            f.reorganizeSlots();
+            for (const s of f.soldiers) {
+                if (s && !s.isDead) {
+                    s.stateDirty = true;
+                    s.isTryingToMove = true;
+                }
+            }
+        }
+
         if (window.HUD && window.HUD.updateBrigadeCardIcon) {
             window.HUD.updateBrigadeCardIcon(b.id, 'MOVE_TO');
         }
@@ -402,9 +480,9 @@ window.getBrigadeCenter = function(b) {
     let count = 0;
     if (b.formations && b.formations.length > 0) {
         for (const f of b.formations) {
-            if (f.soldiers) {
+            if (f && f.soldiers) {
                 for (const s of f.soldiers) {
-                    if (!s.isDead) {
+                    if (s && !s.isDead) {
                         center.x += s.x;
                         center.y += (s.terrainY !== undefined ? s.terrainY : (s.y ? s.y - 1.5 : 0));
                         center.z += s.z;
@@ -417,7 +495,7 @@ window.getBrigadeCenter = function(b) {
     if (count === 0 && window.battleManager && window.battleManager.getCatapults) {
         const catapults = window.battleManager.getCatapults();
         for (const c of catapults) {
-            if ((c.brigada === b || (c.brigada && c.brigada.id === b.id)) && !c.isDead) {
+            if (c && (c.brigada === b || (c.brigada && c.brigada.id === b.id)) && !c.isDead) {
                 center.x += c.x;
                 center.y += (c.terrainY !== undefined ? c.terrainY : 0);
                 center.z += c.z;
@@ -428,6 +506,9 @@ window.getBrigadeCenter = function(b) {
     if (count > 0) {
         center.divideScalar(count);
         if (b.formations && b.formations[0]) {
+            if (!b.formations[0].centerPosition) {
+                b.formations[0].centerPosition = new THREE.Vector3();
+            }
             b.formations[0].centerPosition.copy(center);
         }
         return center;

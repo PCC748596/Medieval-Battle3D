@@ -36,6 +36,11 @@ let prevPointerY = 0;
 let activeDragButton = -1;
 let totalDragDist = 0;
 
+let draggingBrigadeId = null;
+let isDraggingPath = false;
+const lastDragTarget = new THREE.Vector3();
+let activeDragPath = [];
+
 function onPointerStart(x, y, button = 0) {
     isPointerDown = true;
     activeDragButton = button;
@@ -43,10 +48,85 @@ function onPointerStart(x, y, button = 0) {
     prevPointerY = y;
     totalDragDist = 0;
     isDraggingPath = false;
+    activeDragPath = [];
+    window.activeDragPath = null;
+    window.activeDragTarget = null;
     
     if (button === 0) {
         draggingBrigadeId = getClickedBrigadeId(x, y);
+        if (draggingBrigadeId && window.AICommanderSystem) {
+            let b = window.AICommanderSystem.knightGeneral.brigades.find(br => br.id === draggingBrigadeId);
+            if (!b) b = window.AICommanderSystem.goblinGeneral.brigades.find(br => br.id === draggingBrigadeId);
+            if (b && window.getBrigadeCenter) {
+                const origin = window.getBrigadeCenter(b);
+                activeDragPath.push(origin.clone());
+            }
+        }
     }
+}
+
+function updatePathDrawing(clientX, clientY) {
+    if (!draggingBrigadeId) return;
+    
+    _clickPointer.x = (clientX / window.innerWidth) * 2 - 1;
+    _clickPointer.y = -(clientY / window.innerHeight) * 2 + 1;
+    _clickRaycaster.setFromCamera(_clickPointer, camera);
+    
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const target = new THREE.Vector3();
+    const intersect = _clickRaycaster.ray.intersectPlane(plane, target);
+    
+    if (intersect) {
+        let b = window.AICommanderSystem ? window.AICommanderSystem.knightGeneral.brigades.find(br => br.id === draggingBrigadeId) : null;
+        if (!b && window.AICommanderSystem) {
+            b = window.AICommanderSystem.goblinGeneral.brigades.find(br => br.id === draggingBrigadeId);
+        }
+        if (b) {
+            if (activeDragPath.length === 0 && window.getBrigadeCenter) {
+                activeDragPath.push(window.getBrigadeCenter(b).clone());
+            }
+            
+            const lastPt = activeDragPath[activeDragPath.length - 1];
+            if (!lastPt || lastPt.distanceTo(target) >= 3.0) {
+                activeDragPath.push(target.clone());
+            }
+            
+            window.isDraggingPath = true;
+            isDraggingPath = true;
+            window.activeDragPath = activeDragPath;
+            window.activeDragTarget = target.clone();
+            lastDragTarget.copy(target);
+        }
+    }
+}
+
+function onPointerEnd(clientX, clientY) {
+    if (isPointerDown && activeDragButton === 0) {
+        if (isDraggingPath && draggingBrigadeId) {
+            if (window.activeDragTarget) {
+                if (activeDragPath.length === 0 || activeDragPath[activeDragPath.length - 1].distanceTo(window.activeDragTarget) > 1.0) {
+                    activeDragPath.push(window.activeDragTarget.clone());
+                }
+            }
+            if (activeDragPath.length >= 2 && window.setBrigadeWaypoints) {
+                window.setBrigadeWaypoints(draggingBrigadeId, activeDragPath);
+            } else if (lastDragTarget && window.setBrigadeMoveTo) {
+                window.setBrigadeMoveTo(draggingBrigadeId, lastDragTarget.x, lastDragTarget.z);
+            }
+        } else if (totalDragDist < 8 && clientX !== undefined && clientY !== undefined) {
+            handleSceneClick(clientX, clientY);
+        }
+    } else if (isPointerDown && totalDragDist < 8 && clientX !== undefined && clientY !== undefined) {
+        handleSceneClick(clientX, clientY);
+    }
+    isPointerDown = false;
+    activeDragButton = -1;
+    isDraggingPath = false;
+    window.isDraggingPath = false;
+    window.activeDragPath = null;
+    window.activeDragTarget = null;
+    activeDragPath = [];
+    draggingBrigadeId = null;
 }
 
 const _controlsForwardCache = new THREE.Vector3();
@@ -165,60 +245,6 @@ function handleSceneClick(clientX, clientY) {
     if (id && window.HUD && window.HUD.selectBrigadeCard) {
         window.HUD.selectBrigadeCard(id, clientX, clientY);
     }
-}
-
-let pathLineMesh = null;
-let pathLineCone = null;
-let pathArrowGroup = null;
-let draggingBrigadeId = null;
-let lastDragTarget = new THREE.Vector3();
-let isDraggingPath = false;
-
-function updatePathDrawing(clientX, clientY) {
-    if (!draggingBrigadeId) return;
-    
-    _clickPointer.x = (clientX / window.innerWidth) * 2 - 1;
-    _clickPointer.y = -(clientY / window.innerHeight) * 2 + 1;
-    _clickRaycaster.setFromCamera(_clickPointer, camera);
-    
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const target = new THREE.Vector3();
-    const intersect = _clickRaycaster.ray.intersectPlane(plane, target);
-    
-    if (intersect) {
-        let b = window.AICommanderSystem ? window.AICommanderSystem.knightGeneral.brigades.find(br => br.id === draggingBrigadeId) : null;
-        if (!b && window.AICommanderSystem) {
-            b = window.AICommanderSystem.goblinGeneral.brigades.find(br => br.id === draggingBrigadeId);
-        }
-        if (b) {
-            const origin = window.getBrigadeCenter ? window.getBrigadeCenter(b) : new THREE.Vector3();
-            if (window.updateTacticalArrow) {
-                window.updateTacticalArrow(origin, target, 0x34d399);
-            }
-            window.isDraggingPath = true;
-            isDraggingPath = true;
-            lastDragTarget.copy(target);
-        }
-    }
-}
-
-function onPointerEnd(clientX, clientY) {
-    if (isPointerDown && activeDragButton === 0) {
-        if (isDraggingPath && draggingBrigadeId) {
-            if (window.setBrigadeMoveTo) {
-                window.setBrigadeMoveTo(draggingBrigadeId, lastDragTarget.x, lastDragTarget.z);
-            }
-        } else if (totalDragDist < 8 && clientX !== undefined && clientY !== undefined) {
-            handleSceneClick(clientX, clientY);
-        }
-    } else if (isPointerDown && totalDragDist < 8 && clientX !== undefined && clientY !== undefined) {
-        handleSceneClick(clientX, clientY);
-    }
-    isPointerDown = false;
-    activeDragButton = -1;
-    isDraggingPath = false;
-    window.isDraggingPath = false;
-    draggingBrigadeId = null;
 }
 
 // Desativa o menu de contexto no painel de visualização para permitir arrastamento com botão direito

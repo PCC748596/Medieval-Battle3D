@@ -290,13 +290,22 @@ class Catapult {
         // Verifica se há inimigos ao alcance de parada e se há empurradores vivos
         const hasTarget = this.hasEnemyInStopRange(opponents);
         const hasPusherAlive = this.pushers.length > 0 && this.pushers.some(p => !p.isDead);
-        const order = this.brigada ? this.brigada.order : 'ADVANCE';
+        const order = this.brigada ? this.brigada.order : (this.faction === 'knights' ? 'WAIT' : 'ADVANCE');
         
         let canMove = false;
         if (order === 'WAIT') {
             canMove = false; // Permanece no lugar
         } else {
             canMove = !hasTarget && hasPusherAlive && opponents.some(o => !o.isDead);
+        }
+
+        let moveTarget = null;
+        if (order === 'MOVE_TO' && this.brigada && this.brigada.customDestination) {
+            moveTarget = this.brigada.customDestination;
+            const distToTarget = Math.hypot(moveTarget.x - this.mesh.position.x, moveTarget.z - this.mesh.position.z);
+            if (distToTarget < 3.0 && (!this.brigada.pathWaypoints || this.brigada.currentWaypointIndex >= this.brigada.pathWaypoints.length - 1)) {
+                canMove = false;
+            }
         }
 
         if (canMove) {
@@ -312,8 +321,22 @@ class Catapult {
 
             const speed = 4.0 * terrainSpeed;
             const moveDist = speed * delta * simSpeed;
-            const dir = window.armies[this.faction].catapultDir;
-            this.mesh.position.x += dir * moveDist;
+            
+            let moveDirX = window.armies[this.faction].catapultDir;
+            let moveDirZ = 0;
+
+            if (moveTarget) {
+                const dx = moveTarget.x - this.mesh.position.x;
+                const dz = moveTarget.z - this.mesh.position.z;
+                const len = Math.hypot(dx, dz);
+                if (len > 0.1) {
+                    moveDirX = dx / len;
+                    moveDirZ = dz / len;
+                }
+            }
+
+            this.mesh.position.x += moveDirX * moveDist;
+            this.mesh.position.z += moveDirZ * moveDist;
             this.mesh.position.y = getTerrainHeight(this.mesh.position.x, this.mesh.position.z) + 0.64;
 
             // Rolamento das rodas
@@ -332,13 +355,13 @@ class Catapult {
             const offsetZValues = [-1.2, 1.2];
             this.pushers.forEach((p, idx) => {
                 if (!p.isDead) {
-                    const tx = this.mesh.position.x - dir * 3.4;
-                    const tz = this.mesh.position.z + offsetZValues[idx];
+                    const tx = this.mesh.position.x - moveDirX * 3.4;
+                    const tz = this.mesh.position.z + offsetZValues[idx] - moveDirZ * 3.4;
                     const ty = getTerrainHeight(tx, tz) + 1.5;
 
                     p.x = tx; p.y = ty; p.z = tz;
-                    p.rotY = (dir === 1) ? -Math.PI / 2 : Math.PI / 2;
-                    p.lastVelocity.set(dir * speed, 0, 0);
+                    p.rotY = Math.atan2(moveDirX, moveDirZ) + Math.PI;
+                    p.lastVelocity.set(moveDirX * speed, 0, moveDirZ * speed);
                     p.isTryingToMove = true;
                     
                     if (p.torso) {

@@ -50,7 +50,8 @@ function spawnCatapults() {
             pusherList.push(p1, p2);
             
             if (aiBrigade) {
-                aiBrigade.formations.push({ soldiers: [cat, p1, p2] }); // Mock formation para contagem no HUD
+                const f = aiBrigade.createFormation();
+                f.soldiers = [cat, p1, p2];
             }
         }
     };
@@ -397,7 +398,7 @@ function resetBattle() {
     
     // Prepara estado inicial das brigadas do jogador para esperar ordem
     if (window.AICommanderSystem) {
-        window.AICommanderSystem.knightGeneral.brigades.forEach(b => b.order = 'ADVANCE'); // Default ADVANCE
+        window.AICommanderSystem.knightGeneral.brigades.forEach(b => b.order = 'WAIT'); // Default WAIT
         if (window.HUD && window.HUD.renderGroups) {
             window.HUD.renderGroups('knights', window.AICommanderSystem.knightGeneral.brigades);
         }
