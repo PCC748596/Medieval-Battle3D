@@ -1624,12 +1624,18 @@ class Warrior {
         }
     }
 
-    // --- ARVORE DE COMPORTAMENTO: COMPORTAMENTO DE EMPURRADOR DE CATAPULTA (SEQUÊNCIA/SELETOR) ---
     evaluatePusherBehavior(opponents, delta, simSpeed) {
         if (!this.isPusher || !this.catapult || this.catapult.isDead) return false;
 
         const cat = this.catapult;
-        // Se a catapulta está se movendo, o pusher apenas acompanha o movimento fisicamente
+        const catOrder = cat.brigada ? cat.brigada.order : (cat.faction === 'knights' ? 'WAIT' : 'ADVANCE');
+        if (catOrder === 'WAIT') {
+            this.lastVelocity.set(0, 0, 0);
+            this.isTryingToMove = false;
+            resolveLogCollisions(this);
+            return true;
+        }
+
         const hasTarget = cat.hasEnemyInStopRange ? cat.hasEnemyInStopRange(opponents) : cat.hasEnemyInRange(opponents);
         const hasPusherAlive = cat.pushers.some(p => !p.isDead);
         const catIsMoving = !hasTarget && hasPusherAlive;
@@ -1637,7 +1643,7 @@ class Warrior {
         if (catIsMoving) {
             resolveLogCollisions(this);
             this.isTryingToMove = true;
-            return true; // Sucesso (Nó executado com prioridade)
+            return true;
         }
 
         // Defende a catapulta se ela não estiver se movendo e houver inimigos extremamente próximos dela
@@ -1731,7 +1737,22 @@ class Warrior {
             return true;
         }
 
-        if (hasValidTarget) {
+        let shouldChaseTarget = hasValidTarget;
+        
+        if (hasValidTarget && order === 'MOVE_TO') {
+            const dx = getTargetX(this.target) - this.x;
+            const dz = getTargetZ(this.target) - this.z;
+            const distSq = dx * dx + dz * dz;
+            const targetRadius = this.target.radius || 0.8;
+            const isMeleeCombatant = (this.role === 'melee' || this.isDaggerArcher);
+            const actualAttackRange = isMeleeCombatant ? (this.attackRange - 0.8 + targetRadius) : this.attackRange;
+            
+            if (distSq > actualAttackRange * actualAttackRange) {
+                shouldChaseTarget = false;
+            }
+        }
+
+        if (shouldChaseTarget) {
             if (window.CombatProfiler) window.CombatProfiler.start('cálculo de distância');
             const dx = getTargetX(this.target) - this.x;
             const dz = getTargetZ(this.target) - this.z;

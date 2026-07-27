@@ -42,19 +42,23 @@ class Formacao {
         let anchorZ = this.centerPosition.z;
 
         if (this.brigada && this.brigada.order === 'MOVE_TO' && this.brigada.customDestination) {
-            anchorX = this.centerPosition.x + dirX * 4.0;
-            anchorZ = this.centerPosition.z + dirZ * 4.0;
+            const distToDest = this.centerPosition.distanceTo(this.brigada.customDestination);
+            const pullDist = Math.min(4.0, distToDest);
+            anchorX = this.centerPosition.x + dirX * pullDist;
+            anchorZ = this.centerPosition.z + dirZ * pullDist;
         }
 
+        const numRows = Math.ceil(activeSoldiers.length / colsPerBlock);
+        
         for (let i = 0; i < activeSoldiers.length; i++) {
             const s = activeSoldiers[i];
             const row = Math.floor(i / colsPerBlock);
             const col = i % colsPerBlock;
             const colOffset = (col - (colsPerBlock - 1) / 2) * spacingZ;
-            const rowOffset = row * spacingX;
+            const rowOffset = (row - (numRows - 1) / 2) * spacingX;
 
-            const slotX = anchorX + dirX * rowOffset + perpX * colOffset;
-            const slotZ = anchorZ + dirZ * rowOffset + perpZ * colOffset;
+            const slotX = anchorX - dirX * rowOffset + perpX * colOffset;
+            const slotZ = anchorZ - dirZ * rowOffset + perpZ * colOffset;
 
             if (!s.formationTarget) {
                 s.formationTarget = new THREE.Vector3();
@@ -206,11 +210,41 @@ class Brigada {
                     if (this.currentWaypointIndex === undefined || this.currentWaypointIndex < 0) {
                         this.currentWaypointIndex = 0;
                     }
+                    
                     let targetWp = this.pathWaypoints[this.currentWaypointIndex];
                     
-                    while (targetWp && firstForm.centerPosition.distanceTo(targetWp) < 4.5) {
-                        this.currentWaypointIndex++;
-                        targetWp = this.pathWaypoints[this.currentWaypointIndex];
+                    while (targetWp) {
+                        const pos = firstForm.centerPosition;
+                        const dist = pos.distanceTo(targetWp);
+                        const isLastWp = (this.currentWaypointIndex >= this.pathWaypoints.length - 1);
+                        
+                        let hasPassed = false;
+                        const dirX = targetWp.x - pos.x;
+                        const dirZ = targetWp.z - pos.z;
+                        const dotWithForm = firstForm.direction.x * dirX + firstForm.direction.z * dirZ;
+
+                        if (isLastWp) {
+                            // Se a última ponta da seta estiver atrás da formação ou a menos de 5.0m, o caminho terminou
+                            if (dist < 5.0 || dotWithForm <= 0) {
+                                hasPassed = true;
+                            }
+                        } else {
+                            const nextWp = this.pathWaypoints[this.currentWaypointIndex + 1];
+                            const segX = nextWp.x - targetWp.x;
+                            const segZ = nextWp.z - targetWp.z;
+                            const posSegX = pos.x - targetWp.x;
+                            const posSegZ = pos.z - targetWp.z;
+                            if (dist < 5.0 || (segX * posSegX + segZ * posSegZ >= 0)) {
+                                hasPassed = true;
+                            }
+                        }
+
+                        if (hasPassed) {
+                            this.currentWaypointIndex++;
+                            targetWp = this.pathWaypoints[this.currentWaypointIndex];
+                        } else {
+                            break;
+                        }
                     }
                     
                     if (targetWp) {
@@ -222,6 +256,7 @@ class Brigada {
                             }
                         }
                     } else {
+                        // Trajeto concluído! Parar a brigada completamente no local da seta
                         this.order = 'WAIT';
                         this.pathWaypoints = null;
                         this.customDestination = null;

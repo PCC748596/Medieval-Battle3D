@@ -407,6 +407,10 @@ function resetBattle() {
     // Mostra o botão de Iniciar Combate e Painel
     if (window.HUD && window.HUD.elements.btnStartBattle) {
         window.HUD.elements.btnStartBattle.classList.remove('hidden');
+        window.HUD.elements.btnStartBattle.innerText = 'Iniciar';
+        window.HUD.elements.btnStartBattle.onclick = window.startPreBattle;
+        window.HUD.elements.btnStartBattle.classList.add('bg-amber-500', 'hover:bg-amber-400');
+        window.HUD.elements.btnStartBattle.classList.remove('bg-slate-600', 'hover:bg-slate-500', 'text-white');
     }
     if (window.HUD && window.HUD.elements.bottomCommandHud) {
         // Assegura que está visível se houver toggle futuro
@@ -420,9 +424,10 @@ function resetBattle() {
 window.resetBattle = resetBattle;
 
 window.startPreBattle = function() {
-    // Esconde o botão Iniciar
+    // Transforma o botão Iniciar em Pausar
     if (window.HUD && window.HUD.elements.btnStartBattle) {
-        window.HUD.elements.btnStartBattle.classList.add('hidden');
+        window.HUD.elements.btnStartBattle.innerText = 'Pausar';
+        window.HUD.elements.btnStartBattle.onclick = togglePause;
     }
     
     // Esconde menu de contexto caso esteja aberto
@@ -669,6 +674,7 @@ function spawnFormation(faction, role, count, startX, dir, startXOffset, zBase, 
         const w = new Warrior(faction, role, x, z);
         if (aiFormation) {
             aiFormation.addSoldier(w);
+            aiFormation.direction.set(-dir, 0, 0);
         }
         const armyList = window.armies[faction].list;
         w._armyIndex = armyList.length;

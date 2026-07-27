@@ -658,22 +658,11 @@ window.renderAllBrigadePaths = function() {
         if (b.order === 'MOVE_TO' && b.pathWaypoints && b.pathWaypoints.length >= 1) {
             const origin = window.getBrigadeCenter(b);
             let idx = b.currentWaypointIndex || 0;
-            
-            // Avança idx sempre que a posição atual do grupo estiver mais próxima do próximo waypoint
-            while (idx < b.pathWaypoints.length - 1) {
-                const distCurrent = origin.distanceTo(b.pathWaypoints[idx]);
-                const distNext = origin.distanceTo(b.pathWaypoints[idx + 1]);
-                if (distNext <= distCurrent || distCurrent < 6.0) {
-                    idx++;
-                } else {
-                    break;
+            if (idx < b.pathWaypoints.length) {
+                const remainingWps = b.pathWaypoints.slice(idx);
+                if (remainingWps.length > 0) {
+                    pathPoints = [origin, ...remainingWps];
                 }
-            }
-            
-            b.currentWaypointIndex = idx;
-            const remainingWps = b.pathWaypoints.slice(idx);
-            if (remainingWps.length > 0) {
-                pathPoints = [origin, ...remainingWps];
             }
         } else if (b.order === 'MOVE_TO' && b.customDestination) {
             const origin = window.getBrigadeCenter(b);

@@ -97,10 +97,22 @@ const HUD = {
             this.elements.btnPause.className = "py-2.5 px-3 bg-slate-700 hover:bg-slate-600 text-xs font-black rounded-lg transition-all shadow-lg flex items-center justify-center gap-1.5 active:scale-95";
             if (this.elements.pauseIcon) this.elements.pauseIcon.innerText = "▶️";
             if (this.elements.pauseText) this.elements.pauseText.innerText = "Continuar";
+            
+            if (this.elements.btnStartBattle && this.elements.btnStartBattle.innerText !== 'Iniciar') {
+                this.elements.btnStartBattle.innerText = 'Continuar';
+                this.elements.btnStartBattle.classList.remove('bg-amber-500', 'hover:bg-amber-400');
+                this.elements.btnStartBattle.classList.add('bg-slate-600', 'hover:bg-slate-500', 'text-white');
+            }
         } else {
             this.elements.btnPause.className = "py-2.5 px-3 bg-amber-600 hover:bg-amber-500 text-xs font-black rounded-lg transition-all shadow-lg flex items-center justify-center gap-1.5 active:scale-95";
             if (this.elements.pauseIcon) this.elements.pauseIcon.innerText = "⏸️";
             if (this.elements.pauseText) this.elements.pauseText.innerText = "Pausar";
+            
+            if (this.elements.btnStartBattle && this.elements.btnStartBattle.innerText !== 'Iniciar') {
+                this.elements.btnStartBattle.innerText = 'Pausar';
+                this.elements.btnStartBattle.classList.add('bg-amber-500', 'hover:bg-amber-400');
+                this.elements.btnStartBattle.classList.remove('bg-slate-600', 'hover:bg-slate-500', 'text-white');
+            }
         }
     },
 
