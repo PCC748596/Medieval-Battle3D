@@ -100,9 +100,9 @@ function getClickedBrigadeId(clientX, clientY) {
 
     _clickPointer.x = (clientX / window.innerWidth) * 2 - 1;
     _clickPointer.y = -(clientY / window.innerHeight) * 2 + 1;
-    _clickRaycaster.setFromCamera(_clickPointer, camera);
+    _clickRaycaster.setFromCamera(_clickPointer, window.camera);
 
-    const knights = battleManager.getKnights();
+    const knights = window.battleManager.getKnights();
     let closestWarrior = null;
     let closestDist = Infinity;
 
@@ -122,8 +122,8 @@ function getClickedBrigadeId(clientX, clientY) {
         }
     }
 
-    if (!closestWarrior && battleManager.getCatapults) {
-        const catapults = battleManager.getCatapults();
+    if (!closestWarrior && window.battleManager.getCatapults) {
+        const catapults = window.battleManager.getCatapults();
         let closestCat = null;
         for (let i = 0; i < catapults.length; i++) {
             const c = catapults[i];
@@ -191,12 +191,12 @@ function updatePathDrawing(clientX, clientY) {
         
         pathArrowGroup.add(pathLineMesh);
         pathArrowGroup.add(pathLineCone);
-        scene.add(pathArrowGroup);
+        window.scene.add(pathArrowGroup);
     }
     
     _clickPointer.x = (clientX / window.innerWidth) * 2 - 1;
     _clickPointer.y = -(clientY / window.innerHeight) * 2 + 1;
-    _clickRaycaster.setFromCamera(_clickPointer, camera);
+    _clickRaycaster.setFromCamera(_clickPointer, window.camera);
     
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const target = new THREE.Vector3();
