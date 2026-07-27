@@ -29,16 +29,29 @@ function spawnCatapults() {
             const zOff = group.zBase;
             const xOff = isNapoleonicTheme() ? CONFIG.CATAPULT_OFFSET_NAPOLEONIC : CONFIG.CATAPULT_OFFSET_MEDIEVAL;
             
+            let aiBrigade = null;
+            if (window.AICommanderSystem) {
+                const general = window.AICommanderSystem[faction === 'knights' ? 'knightGeneral' : 'goblinGeneral'];
+                aiBrigade = general.createBrigade(`${faction}-catapult-${i}`, 'CATAPULT');
+            }
+            
             const cat = new Catapult(faction, catX, zOff);
+            cat.brigada = aiBrigade; // Atrela à brigada
             battleManager.addCatapult(cat);
+            
             const p1 = new Warrior(faction, 'melee', catX + dir * xOff, zOff - CONFIG.CATAPULT_PUSHER_Z_OFFSET, true, cat);
             const p2 = new Warrior(faction, 'melee', catX + dir * xOff, zOff + CONFIG.CATAPULT_PUSHER_Z_OFFSET, true, cat);
             if (isNapoleonicTheme()) p1.hasTorch = true;
             cat.pushers = [p1, p2];
+            
             const pusherList = window.armies[faction].list;
             p1._armyIndex = pusherList.length;
             p2._armyIndex = pusherList.length + 1;
             pusherList.push(p1, p2);
+            
+            if (aiBrigade) {
+                aiBrigade.formations.push({ soldiers: [cat, p1, p2] }); // Mock formation para contagem no HUD
+            }
         }
     };
     
@@ -378,14 +391,52 @@ function resetBattle() {
     resetCamera();
     playWarCrySound();
     
+    // Entra na fase PRE_BATTLE
     battleManager.setPause(true);
     HUD.updatePause(true);
+    
+    // Prepara estado inicial das brigadas do jogador para esperar ordem
+    if (window.AICommanderSystem) {
+        window.AICommanderSystem.knightGeneral.brigades.forEach(b => b.order = 'ADVANCE'); // Default ADVANCE
+        if (window.HUD && window.HUD.renderGroups) {
+            window.HUD.renderGroups('knights', window.AICommanderSystem.knightGeneral.brigades);
+        }
+    }
+    
+    // Mostra o botão de Iniciar Combate e Painel
+    if (window.HUD && window.HUD.elements.btnStartBattle) {
+        window.HUD.elements.btnStartBattle.classList.remove('hidden');
+    }
+    if (window.HUD && window.HUD.elements.bottomCommandHud) {
+        // Assegura que está visível se houver toggle futuro
+    }
+    
     if (soundEnabled) {
         stopDrumLoop();
         stopContinuousCrowdRoar();
     }
 }
 window.resetBattle = resetBattle;
+
+window.startPreBattle = function() {
+    // Esconde o botão Iniciar
+    if (window.HUD && window.HUD.elements.btnStartBattle) {
+        window.HUD.elements.btnStartBattle.classList.add('hidden');
+    }
+    
+    // Esconde menu de contexto caso esteja aberto
+    if (window.HUD && window.HUD.elements.orderContextMenu) {
+        window.HUD.elements.orderContextMenu.classList.add('hidden');
+    }
+    
+    // A CPU toma as suas decisões (Goblins)
+    if (window.randomizeCPUOrders) {
+        window.randomizeCPUOrders();
+    }
+    
+    // Inicia a Batalha (despausa)
+    togglePause();
+};
 
 function setupBattleListeners() {
     HUD.setupListeners({
@@ -672,16 +723,18 @@ function spawnUnits(faction, quantity) {
         const countArchers = Math.floor(numArchers / G) + (g < numArchers % G ? 1 : 0);
         const zBase = (g - (G - 1) / 2) * groupSpacingZ;
 
-        let aiBrigade = null;
+        let aiBrigadeMelee = null;
+        let aiBrigadeArcher = null;
         if (window.AICommanderSystem) {
             const general = window.AICommanderSystem[faction === 'knights' ? 'knightGeneral' : 'goblinGeneral'];
-            aiBrigade = general.createBrigade(`${faction}-brig-${g}`, 'MIXED');
+            aiBrigadeMelee = general.createBrigade(`${faction}-melee-${g}`, 'MELEE');
+            aiBrigadeArcher = general.createBrigade(`${faction}-archer-${g}`, 'ARCHER');
         }
 
-        const meleeDepth = spawnMelee(faction, countMelee, startX, dir, zBase, colsPerBlock, spacingX, spacingZ, aiBrigade);
+        const meleeDepth = spawnMelee(faction, countMelee, startX, dir, zBase, colsPerBlock, spacingX, spacingZ, aiBrigadeMelee);
 
         const archerStartXOffset = meleeDepth * spacingX + CONFIG.UNITS_ARCHER_GAP;
-        const archerDepth = spawnArchers(faction, countArchers, startX, dir, zBase, archerStartXOffset, colsPerBlock, spacingX, spacingZ, aiBrigade);
+        const archerDepth = spawnArchers(faction, countArchers, startX, dir, zBase, archerStartXOffset, colsPerBlock, spacingX, spacingZ, aiBrigadeArcher);
 
         const groupEndXOffset = archerStartXOffset + archerDepth * spacingX + CONFIG.UNITS_CATAPULT_GAP;
         groups.push({
@@ -692,6 +745,12 @@ function spawnUnits(faction, quantity) {
 
     registerGroups(faction, groups);
     updateArmyCounters();
+    
+    // Render groups in HUD if AI Commander exists (only for player)
+    if (faction === 'knights' && window.AICommanderSystem && window.HUD && window.HUD.renderGroups) {
+        const general = window.AICommanderSystem.knightGeneral;
+        window.HUD.renderGroups('knights', general.brigades);
+    }
 }
 window.spawnUnits = spawnUnits;
 

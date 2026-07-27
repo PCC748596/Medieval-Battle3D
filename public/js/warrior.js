@@ -1435,10 +1435,23 @@ class Warrior {
             return;
         }
 
-        // Sem alvo válido: ADVANCING ou FLANKING
+        // Sem alvo válido: ADVANCING ou FLANKING ou WAITING
         if (!this.target || this.target.isDead) {
             this.setTarget(null);
             this.isAttacking = false;
+            
+            const order = (this.formation && this.formation.brigada) ? this.formation.brigada.order : 'ADVANCE';
+            if (order === 'WAIT') {
+                this.currentState = 'WAITING';
+                this.lastVelocity.set(0, 0, 0);
+                this.isTryingToMove = false;
+                
+                const targetSearchFreq = this.lodLevel >= 2 ? 48 : 12;
+                if (this.aiTick % targetSearchFreq === 0) {
+                    this.stateDirty = true;
+                }
+                return;
+            }
 
             // Busca novo alvo a cada freq reduzida se estiver avançando/flanqueando
             const targetSearchFreq = this.lodLevel >= 2 ? 48 : 12;
@@ -1745,10 +1758,16 @@ class Warrior {
                 }
             }
         } else {
-            // Se o alvo morreu ou se não tem alvo, avance na direção inimiga base da facção
+            // Se o alvo morreu ou se não tem alvo, avance na direção inimiga base da facção ou aguarde
             this.setTarget(null);
             this.isAttacking = false;
-            if (this.formationTarget) {
+            
+            const order = (this.formation && this.formation.brigada) ? this.formation.brigada.order : 'ADVANCE';
+            if (order === 'WAIT') {
+                this.currentState = 'WAITING';
+                this.lastVelocity.set(0, 0, 0);
+                this.isTryingToMove = false;
+            } else if (this.formationTarget) {
                 this.currentState = 'ADVANCING';
                 const dx = this.formationTarget.x - this.x;
                 const dz = this.formationTarget.z - this.z;

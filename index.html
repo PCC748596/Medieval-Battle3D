@@ -31,38 +31,68 @@
         <span id="fps-counter-topleft" class="text-xs text-emerald-400 font-mono font-black">FPS: --</span>
     </div>
 
-    <div
-        class="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex gap-4 md:gap-8 bg-slate-900/90 backdrop-blur-md px-6 py-2.5 rounded-full border border-slate-700/50 shadow-2xl items-center max-w-[95vw]">
-        <div class="flex items-center gap-3">
-            <div class="w-3.5 h-3.5 bg-blue-500 rounded-full animate-pulse"></div>
-            <div>
-                <p id="label-knights" class="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none">Cavaleiros</p>
-                <p id="count-knights" class="text-lg md:text-xl font-black text-blue-400 mt-0.5 leading-none">50</p>
-                <div class="text-[8px] text-slate-500 mt-1 leading-tight tracking-tight uppercase">
-                    Gen: <span id="ai-gen-knights" class="text-blue-300 font-bold">Lendo...</span><br>
-                    Brig: <span id="ai-brig-knights" class="text-blue-300 font-bold">Lendo...</span><br>
-                    Form: <span id="ai-form-knights" class="text-blue-300 font-bold">Lendo...</span>
+    <div id="hidden-hud-fallback" style="display:none;">
+        <span id="label-knights"></span>
+        <span id="count-knights"></span>
+        <span id="ai-gen-knights"></span>
+        <span id="ai-brig-knights"></span>
+        <span id="ai-form-knights"></span>
+        
+        <span id="count-kills"></span>
+        
+        <span id="label-goblins"></span>
+        <span id="count-goblins"></span>
+        <span id="ai-gen-goblins"></span>
+        <span id="ai-brig-goblins"></span>
+        <span id="ai-form-goblins"></span>
+    </div>
+
+    <!-- Novo Painel Inferior de Planejamento -->
+    <div id="bottom-command-hud" class="absolute bottom-0 left-0 w-full z-10 pointer-events-none flex flex-col justify-end p-4 gap-2">
+        
+        <!-- Painel Principal Inferior -->
+        <div class="flex justify-between items-end w-full max-w-[1400px] mx-auto pointer-events-auto bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-700/50 shadow-2xl p-4 gap-4">
+            
+            <!-- Exército Azul (Jogador) -->
+            <div class="flex-1 flex flex-col gap-2">
+                <div class="text-blue-400 font-black text-sm uppercase tracking-wider flex items-center gap-2">
+                    <div class="w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse"></div>
+                    Jogador
+                </div>
+                <!-- Grupos (Gerados dinamicamente via JS) -->
+                <div id="blue-groups-container" class="flex flex-wrap gap-2">
+                    <!-- Exemplo de carta (será gerado) -->
                 </div>
             </div>
-        </div>
-        <div class="h-6 w-[1px] bg-slate-700"></div>
-        <div class="text-center min-w-[50px]">
-            <p class="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none">Baixas</p>
-            <p id="count-kills" class="text-base md:text-lg font-bold text-amber-500 mt-0.5 leading-none">0</p>
-        </div>
-        <div class="h-6 w-[1px] bg-slate-700"></div>
-        <div class="flex items-center gap-3">
-            <div class="text-right">
-                <p id="label-goblins" class="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none">Goblins</p>
-                <p id="count-goblins" class="text-lg md:text-xl font-black text-red-400 mt-0.5 leading-none">50</p>
-                <div class="text-[8px] text-slate-500 mt-1 leading-tight tracking-tight uppercase">
-                    Gen: <span id="ai-gen-goblins" class="text-red-300 font-bold">Lendo...</span><br>
-                    Brig: <span id="ai-brig-goblins" class="text-red-300 font-bold">Lendo...</span><br>
-                    Form: <span id="ai-form-goblins" class="text-red-300 font-bold">Lendo...</span>
-                </div>
+
+            <!-- VS Placar Central e Botão de Iniciar -->
+            <div class="flex flex-col items-center justify-center min-w-[120px] pb-2">
+                <button id="btn-start-battle" onclick="startPreBattle()" class="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-900 font-black rounded-lg shadow-[0_0_10px_rgba(245,158,11,0.5)] border border-amber-300 transition-all active:scale-95 text-[10px] uppercase tracking-wider mb-2 hidden">
+                    Iniciar
+                </button>
+                <div class="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">Confronto</div>
+                <div class="text-2xl font-black text-amber-500 leading-none">VS</div>
             </div>
-            <div class="w-3.5 h-3.5 bg-red-500 rounded-full animate-pulse"></div>
+
+            <!-- Exército Vermelho (CPU) -->
+            <div class="flex-1 flex flex-col gap-2 items-end">
+                <div class="text-red-400 font-black text-sm uppercase tracking-wider flex items-center gap-2">
+                    CPU (IA)
+                    <div class="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></div>
+                </div>
+                <div class="text-slate-500 text-xs font-bold uppercase tracking-widest mt-2 border border-slate-700/50 border-dashed rounded-lg px-4 py-2 bg-slate-800/30">
+                    Ordens Ocultas
+                </div>
+                <div id="red-groups-container" class="hidden"></div>
+            </div>
+            
         </div>
+    </div>
+    
+    <!-- Menu de Contexto para Ordens (Escondido) -->
+    <div id="order-context-menu" class="absolute z-20 hidden bg-slate-800 border border-slate-600 rounded-lg shadow-xl p-2 flex flex-col gap-1 w-32">
+        <button onclick="setBrigadeOrder('ADVANCE')" class="text-left px-3 py-2 text-xs font-bold text-white hover:bg-slate-700 rounded transition-colors">⚔️ Avançar</button>
+        <button onclick="setBrigadeOrder('WAIT')" class="text-left px-3 py-2 text-xs font-bold text-white hover:bg-slate-700 rounded transition-colors">🛡️ Aguardar</button>
     </div>
 
     <!-- Botão de Alternar Visibilidade do Painel (Otimizado para Toque) -->

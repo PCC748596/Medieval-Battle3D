@@ -42,8 +42,24 @@ const HUD = {
             speedSlider: document.getElementById('speed-slider'),
             
             loader: document.getElementById('loader'),
-            loaderText: document.getElementById('loader-text')
+            loaderText: document.getElementById('loader-text'),
+            
+            // Novos elementos do Painel Inferior
+            blueGroupsContainer: document.getElementById('blue-groups-container'),
+            redGroupsContainer: document.getElementById('red-groups-container'),
+            btnStartBattle: document.getElementById('btn-start-battle'),
+            orderContextMenu: document.getElementById('order-context-menu')
         };
+        
+        // Esconde menu de contexto se clicar fora
+        document.addEventListener('click', (e) => {
+            if (HUD.elements.orderContextMenu && !HUD.elements.orderContextMenu.contains(e.target) && !e.target.closest('.group-card-blue')) {
+                HUD.elements.orderContextMenu.classList.add('hidden');
+                document.querySelectorAll('.indicator-select').forEach(el => el.classList.add('hidden'));
+                document.querySelectorAll('.group-card-blue').forEach(el => el.classList.remove('ring-2', 'ring-amber-500'));
+                window.selectedBrigadeId = null;
+            }
+        });
     },
 
     updateKills(kills) {
@@ -232,6 +248,87 @@ const HUD = {
         }
         if (this.elements.speedSlider) {
             this.elements.speedSlider.addEventListener('input', (e) => callbacks.onSpeedChange(e.target.value));
+        }
+    },
+    
+    // --- Lógica do Painel Inferior (Cartas de Grupos) ---
+    renderGroups(faction, brigades) {
+        const container = faction === 'knights' ? this.elements.blueGroupsContainer : this.elements.redGroupsContainer;
+        if (!container) return;
+        
+        container.innerHTML = ''; // Limpa antigos
+        
+        const isPlayer = faction === 'knights';
+        const bgClass = isPlayer ? 'bg-blue-900/40 border-blue-500/50 hover:bg-blue-800/60' : 'bg-red-900/40 border-red-500/50';
+        const textClass = isPlayer ? 'text-blue-300' : 'text-red-300';
+        const interactiveClass = isPlayer ? 'cursor-pointer group-card-blue' : 'cursor-default opacity-80';
+        
+        const orderWeight = { 'MELEE': 1, 'ARCHER': 2, 'CATAPULT': 3 };
+        const sortedBrigades = [...brigades].sort((a, b) => (orderWeight[a.type] || 0) - (orderWeight[b.type] || 0));
+        
+        sortedBrigades.forEach((brigade, index) => {
+            const count = brigade.formations.reduce((sum, f) => sum + f.soldiers.length, 0);
+            
+            // Define a borda baseada na ordem atual (para indicar Aguardar sem usar um ícone extra)
+            let currentBorder = isPlayer ? (brigade.order === 'WAIT' ? 'border-amber-400/80 shadow-[0_0_8px_rgba(251,191,36,0.4)]' : 'border-blue-500/50') : 'border-red-500/50';
+            
+            const card = document.createElement('div');
+            card.className = `w-10 h-14 rounded-xl border ${bgClass} ${currentBorder} ${interactiveClass} flex flex-col items-center justify-center relative transition-all shadow-sm active:scale-95 shrink-0`;
+            card.dataset.brigadeId = brigade.id;
+            
+            // Ícone do tipo de tropa
+            let typeIcon = '⚔️';
+            if (brigade.type === 'ARCHER') typeIcon = '🏹';
+            else if (brigade.type === 'CATAPULT') typeIcon = '🏗️';
+            
+            card.innerHTML = `
+                <div class="text-xl leading-none mb-1 mt-1">${typeIcon}</div>
+                <div class="${textClass} text-[10px] font-black leading-none">${count}</div>
+                ${isPlayer ? '<div class="absolute -top-1 -right-1 w-3 h-3 bg-amber-500 rounded-full border border-slate-900 hidden indicator-select"></div>' : ''}
+            `;
+            
+            if (isPlayer) {
+                card.onclick = (e) => {
+                    this.showOrderContextMenu(e, brigade.id, card);
+                };
+            }
+            
+            container.appendChild(card);
+        });
+    },
+    
+    showOrderContextMenu(event, brigadeId, cardElement) {
+        const menu = this.elements.orderContextMenu;
+        if (!menu) return;
+        
+        // Remove destaque de todos
+        document.querySelectorAll('.indicator-select').forEach(el => el.classList.add('hidden'));
+        document.querySelectorAll('.group-card-blue').forEach(el => el.classList.remove('ring-2', 'ring-amber-500'));
+        
+        // Destaca o atual
+        cardElement.classList.add('ring-2', 'ring-amber-500');
+        const indicator = cardElement.querySelector('.indicator-select');
+        if (indicator) indicator.classList.remove('hidden');
+        
+        // Posiciona menu
+        menu.style.left = `${event.clientX}px`;
+        menu.style.top = `${event.clientY - 90}px`; // Acima do mouse
+        menu.classList.remove('hidden');
+        
+        window.selectedBrigadeId = brigadeId; // Salva globalmente para setBrigadeOrder
+    },
+    
+    updateBrigadeCardIcon(brigadeId, order) {
+        // Encontra o card pelo data-attribute
+        const card = document.querySelector(`div[data-brigade-id="${brigadeId}"]`);
+        if (card) {
+            if (order === 'WAIT') {
+                card.classList.remove('border-blue-500/50');
+                card.classList.add('border-amber-400/80', 'shadow-[0_0_8px_rgba(251,191,36,0.4)]');
+            } else {
+                card.classList.remove('border-amber-400/80', 'shadow-[0_0_8px_rgba(251,191,36,0.4)]');
+                card.classList.add('border-blue-500/50');
+            }
         }
     }
 };

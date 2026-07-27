@@ -290,7 +290,14 @@ class Catapult {
         // Verifica se há inimigos ao alcance de parada e se há empurradores vivos
         const hasTarget = this.hasEnemyInStopRange(opponents);
         const hasPusherAlive = this.pushers.length > 0 && this.pushers.some(p => !p.isDead);
-        const canMove = !hasTarget && hasPusherAlive && opponents.some(o => !o.isDead);
+        const order = this.brigada ? this.brigada.order : 'ADVANCE';
+        
+        let canMove = false;
+        if (order === 'WAIT') {
+            canMove = false; // Permanece no lugar
+        } else {
+            canMove = !hasTarget && hasPusherAlive && opponents.some(o => !o.isDead);
+        }
 
         if (canMove) {
             let terrainSpeed = 1.0;

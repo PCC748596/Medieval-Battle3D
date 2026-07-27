@@ -498,6 +498,67 @@ function renderWarriorsInstanced() {
     if (window.PerformanceProfiler) window.PerformanceProfiler.end('matrizes_instancedmesh');
 }
 
+let selectionMarkerMesh = null;
+function renderSelectionMarker() {
+    if (!selectionMarkerMesh) {
+        const group = new THREE.Group();
+        
+        // Ring on ground
+        const geo = new THREE.RingGeometry(2.5, 3.5, 32);
+        geo.rotateX(-Math.PI / 2);
+        const mat = new THREE.MeshBasicMaterial({ 
+            color: 0xffdd00, 
+            transparent: true, 
+            opacity: 0.6, 
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+        const ring = new THREE.Mesh(geo, mat);
+        group.add(ring);
+        
+        // Floating arrow
+        const arrowGeo = new THREE.ConeGeometry(1.5, 3, 8);
+        arrowGeo.rotateX(Math.PI); // Point down
+        const arrowMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.9, depthTest: false });
+        const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+        arrow.position.y = 8;
+        group.add(arrow);
+        
+        selectionMarkerMesh = group;
+        selectionMarkerMesh.visible = false;
+        scene.add(selectionMarkerMesh);
+    }
+
+    if (window.selectedBrigadeId && window.AICommanderSystem) {
+        const brigade = window.AICommanderSystem.knightGeneral.brigades.find(b => b.id === window.selectedBrigadeId);
+        if (brigade && brigade.formations.length > 0) {
+            let cx = 0, cz = 0;
+            // Get center
+            for (const f of brigade.formations) {
+                cx += f.centerPosition.x;
+                cz += f.centerPosition.z;
+            }
+            cx /= brigade.formations.length;
+            cz /= brigade.formations.length;
+            
+            const y = (window.getTerrainHeight ? window.getTerrainHeight(cx, cz) : 0) + 0.2;
+            
+            selectionMarkerMesh.position.set(cx, y, cz);
+            
+            // Animation
+            const time = performance.now() * 0.003;
+            selectionMarkerMesh.children[0].rotation.z = time * 0.5; // Rotate ring (wait, ring is already rotated X, so rotating Z spins it flat)
+            selectionMarkerMesh.children[1].position.y = 8 + Math.sin(time * 2) * 2;
+            selectionMarkerMesh.children[1].rotation.y = time;
+            
+            selectionMarkerMesh.visible = true;
+            return;
+        }
+    }
+    
+    selectionMarkerMesh.visible = false;
+}
+
 function animate() {
     if (window.PerformanceProfiler) window.PerformanceProfiler.startFrame();
     requestAnimationFrame(animate);
@@ -740,6 +801,8 @@ function animate() {
     }
 
     renderWarriorsInstanced();
+    renderSelectionMarker();
+    
     if (window.PerformanceProfiler) window.PerformanceProfiler.start('render_unidades');
     renderer.render(scene, camera);
     if (window.PerformanceProfiler) {

@@ -75,6 +75,7 @@ class Brigada {
         this.targetPosition = new THREE.Vector3();
         this.targetBrigade = null;
         this.state = 'IDLE'; // IDLE, ADVANCING, ENGAGED, BREAKING, FLEEING
+        this.order = 'ADVANCE'; // ADVANCE, WAIT
     }
 
     createFormation() {
@@ -204,3 +205,34 @@ class AICommander {
 }
 
 window.AICommanderSystem = new AICommander();
+
+window.setBrigadeOrder = function(order) {
+    if (!window.selectedBrigadeId) return;
+    
+    // Find brigade
+    const b = window.AICommanderSystem.knightGeneral.brigades.find(br => br.id === window.selectedBrigadeId);
+    if (b) {
+        b.order = order;
+        if (window.HUD && window.HUD.updateBrigadeCardIcon) {
+            window.HUD.updateBrigadeCardIcon(b.id, order);
+        }
+    }
+    
+    // Hide context menu
+    if (window.HUD && window.HUD.elements.orderContextMenu) {
+        window.HUD.elements.orderContextMenu.classList.add('hidden');
+    }
+    document.querySelectorAll('.indicator-select').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.group-card-blue').forEach(el => el.classList.remove('ring-2', 'ring-amber-500'));
+    window.selectedBrigadeId = null;
+};
+
+window.randomizeCPUOrders = function() {
+    window.AICommanderSystem.goblinGeneral.brigades.forEach(b => {
+        // Exemplo: 70% chance de avançar, 30% chance de aguardar defensivamente
+        b.order = Math.random() < 0.7 ? 'ADVANCE' : 'WAIT';
+    });
+    if (window.HUD && window.HUD.renderGroups) {
+        window.HUD.renderGroups('goblins', window.AICommanderSystem.goblinGeneral.brigades);
+    }
+};
