@@ -90,9 +90,14 @@
     </div>
     
     <!-- Menu de Contexto para Ordens (Escondido) -->
-    <div id="order-context-menu" class="absolute z-20 hidden bg-slate-800 border border-slate-600 rounded-lg shadow-xl p-2 flex flex-col gap-1 w-32">
-        <button onclick="setBrigadeOrder('ADVANCE')" class="text-left px-3 py-2 text-xs font-bold text-white hover:bg-slate-700 rounded transition-colors">⚔️ Avançar</button>
-        <button onclick="setBrigadeOrder('WAIT')" class="text-left px-3 py-2 text-xs font-bold text-white hover:bg-slate-700 rounded transition-colors">🛡️ Aguardar</button>
+    <div id="order-context-menu" class="absolute z-20 hidden bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-1.5 flex flex-col gap-1 w-40 max-h-64 overflow-y-auto">
+        <button onclick="setBrigadeOrder('ADVANCE')" class="text-left px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 rounded-lg transition-colors flex items-center gap-1.5">⚔️ Avançar</button>
+        <button onclick="setBrigadeOrder('WAIT')" class="text-left px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 rounded-lg transition-colors flex items-center gap-1.5">🛡️ Defender / Espere</button>
+        <button onclick="setBrigadeOrder('FLANK_LEFT')" class="text-left px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 rounded-lg transition-colors flex items-center gap-1.5">↖️ Flanquear Esq.</button>
+        <button onclick="setBrigadeOrder('FLANK_RIGHT')" class="text-left px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 rounded-lg transition-colors flex items-center gap-1.5">↗️ Flanquear Dir.</button>
+        <button onclick="setBrigadeOrder('RETREAT')" class="text-left px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 rounded-lg transition-colors flex items-center gap-1.5">↩️ Recuar</button>
+        <button onclick="setBrigadeOrder('FOCUS_FIRE')" class="text-left px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 rounded-lg transition-colors flex items-center gap-1.5">🎯 Fogo Concentrado</button>
+        <button onclick="setBrigadeOrder('PURSUE')" class="text-left px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 rounded-lg transition-colors flex items-center gap-1.5">🐕 Perseguir</button>
     </div>
 
     <!-- Botão de Alternar Visibilidade do Painel (Otimizado para Toque) -->

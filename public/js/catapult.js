@@ -422,13 +422,10 @@ class Catapult {
     }
 
     getTargetCentroid(opponents) {
-        // Alcance mínimo realista (20 unidades) para a catapulta disparar contra frentes de batalha,
-        // garantindo que ela não fique travada sem disparar quando os exércitos se aproximarem.
         const minRange = 20;
         const minRangeSq = minRange * minRange;
         const maxRangeSq = this.attackRange * this.attackRange;
 
-        // Encontra centróide de até 12 inimigos dentro da faixa de alcance
         let cx = 0, cz = 0, count = 0;
         const px = this.mesh.position.x;
         const pz = this.mesh.position.z;
@@ -439,7 +436,6 @@ class Catapult {
             const dx = e.x - px;
             const dz = e.z - pz;
             const distSq = dx * dx + dz * dz;
-            // Só mira em inimigos dentro do intervalo de segurança [20, 160]
             if (distSq >= minRangeSq && distSq < maxRangeSq) {
                 cx += e.x;
                 cz += e.z;
@@ -448,7 +444,24 @@ class Catapult {
             }
         }
         if (count === 0) return null;
-        return { x: cx / count, z: cz / count };
+
+        const targetX = cx / count;
+        const targetZ = cz / count;
+
+        // Prevenção de Fogo Amigo (Etapa 10): rejeita se houver aliados no raio de impacto
+        const allies = window.armies[this.faction] ? window.armies[this.faction].list : [];
+        const safeRadiusSq = (this.splashRadius * 2.2) * (this.splashRadius * 2.2);
+        for (let i = 0; i < allies.length; i++) {
+            const ally = allies[i];
+            if (!ally || ally.isDead) continue;
+            const adx = ally.x - targetX;
+            const adz = ally.z - targetZ;
+            if (adx * adx + adz * adz < safeRadiusSq) {
+                return null;
+            }
+        }
+
+        return { x: targetX, z: targetZ };
     }
 
     fire() {

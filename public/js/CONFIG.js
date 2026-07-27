@@ -484,11 +484,25 @@ const PerformanceProfiler = {
 window.PerformanceProfiler = PerformanceProfiler;
 PerformanceProfiler.init();
 
-// --- CONSTANTES GLOBAIS DE DIMENSÃO DA ARENA ---
+// --- CONSTANTES GLOBAIS DE DIMENSÃO DA ARENA E CENA ---
+var scene = new THREE.Scene();
+window.scene = scene;
+var camera;
+var renderer;
 let sizeX = 500;
 let sizeZ = 250;
 let lodEnabled = false;
 let currentTheme = 'medieval';
+let currentEnv = 'dia';
+window.currentEnv = 'dia';
+
+// --- VECTORES REUTILIZÁVEIS PARA EVITAR ALOCAÇÕES POR FRAME ---
+var _tmpVec3A = new THREE.Vector3();
+var _tmpVec3B = new THREE.Vector3();
+var _tmpVec3C = new THREE.Vector3();
+var _tmpVec3D = new THREE.Vector3();
+var _tmpVec3E = new THREE.Vector3();
+var _axisY = new THREE.Vector3(0, 1, 0);
 
 // --- TABELA DE LOOKUP PARA NÚMEROS ALEATÓRIOS ULTRA RÁPIDA (REDUZ LIXO E CHAMADAS DE CPU) ---
 const _RANDOM_TABLE_SIZE = 8192;
@@ -680,10 +694,10 @@ const CONFIG = {
     CAMERA_RADIUS_RATIO: 0.8,
 
     // AI - Layers Update Frequencies (ms)
-    AI_GENERAL_UPDATE_MS: 3000,
-    AI_BRIGADA_UPDATE_MS: 1000,
-    AI_FORMACAO_UPDATE_MS: 200,
-    AI_SOLDADO_UPDATE_MS: 100,
+    AI_GENERAL_UPDATE_MS: 2500,
+    AI_BRIGADA_UPDATE_MS: 250,
+    AI_FORMACAO_UPDATE_MS: 100,
+    AI_SOLDADO_UPDATE_MS: 50,
 
     // AI - Morale and Fatigue Thresholds
     MORALE_FLEE_THRESHOLD: 20,

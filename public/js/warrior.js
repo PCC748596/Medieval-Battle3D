@@ -1113,11 +1113,11 @@ class Warrior {
 
     setTarget(newTarget) {
         if (this.target === newTarget) return;
-        if (this.target && this.target.attackers) {
+        if (this.target && this.target.attackers && typeof this.target.attackers.delete === 'function') {
             this.target.attackers.delete(this);
         }
         this.target = newTarget;
-        if (this.target && this.target.attackers) {
+        if (this.target && this.target.attackers && typeof this.target.attackers.add === 'function') {
             this.target.attackers.add(this);
         }
     }
@@ -2128,8 +2128,37 @@ class Warrior {
 
     takeDamage(amount, attacker) {
         if (window.CombatProfiler) window.CombatProfiler.start('aplicação de dano');
-        this.hp -= amount;
-        this.morale = Math.max(1, this.morale - 1);
+        
+        let finalDamage = amount;
+        let moralePenalty = 1;
+
+        if (attacker) {
+            // Calcular se o ataque veio do Flanco ou da Retaguarda (Etapa 8)
+            const facingX = Math.sin(this.lastTargetAngle || 0);
+            const facingZ = Math.cos(this.lastTargetAngle || 0);
+            const atkX = attacker.x - this.x;
+            const atkZ = attacker.z - this.z;
+            const dist = Math.hypot(atkX, atkZ);
+
+            if (dist > 0.001) {
+                const nx = atkX / dist;
+                const nz = atkZ / dist;
+                const dot = facingX * nx + facingZ * nz;
+
+                if (dot < -0.5) {
+                    // Ataque pela Retaguarda: -60% defesa (Dano 1.6x)
+                    finalDamage *= 1.6;
+                    moralePenalty = 6;
+                } else if (dot < 0.5) {
+                    // Ataque pelo Flanco: -30% defesa (Dano 1.3x)
+                    finalDamage *= 1.3;
+                    moralePenalty = 3;
+                }
+            }
+        }
+
+        this.hp -= finalDamage;
+        this.morale = Math.max(0, this.morale - moralePenalty);
         this.flashTimer = 0.12; // Inicia flash sem setTimeout
 
         createBlood(this);

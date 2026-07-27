@@ -498,65 +498,123 @@ function renderWarriorsInstanced() {
     if (window.PerformanceProfiler) window.PerformanceProfiler.end('matrizes_instancedmesh');
 }
 
-let selectionMarkerMesh = null;
+let selectionCirclesIM = null;
+let selectionCatapultCirclesIM = null;
+const _dummyCircle = new THREE.Object3D();
+
 function renderSelectionMarker() {
-    if (!selectionMarkerMesh) {
-        const group = new THREE.Group();
-        
-        // Ring on ground
-        const geo = new THREE.RingGeometry(2.5, 3.5, 32);
+    if (!selectionCirclesIM) {
+        // Anel de seleção para soldados (raio 0.8 a 1.6)
+        const geo = new THREE.RingGeometry(0.8, 1.6, 16);
         geo.rotateX(-Math.PI / 2);
         const mat = new THREE.MeshBasicMaterial({ 
-            color: 0xffdd00, 
+            color: 0xffffff, 
             transparent: true, 
-            opacity: 0.6, 
+            opacity: 0.7, 
             side: THREE.DoubleSide,
             depthWrite: false
         });
-        const ring = new THREE.Mesh(geo, mat);
-        group.add(ring);
-        
-        // Floating arrow
-        const arrowGeo = new THREE.ConeGeometry(1.5, 3, 8);
-        arrowGeo.rotateX(Math.PI); // Point down
-        const arrowMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.9, depthTest: false });
-        const arrow = new THREE.Mesh(arrowGeo, arrowMat);
-        arrow.position.y = 8;
-        group.add(arrow);
-        
-        selectionMarkerMesh = group;
-        selectionMarkerMesh.visible = false;
-        scene.add(selectionMarkerMesh);
+        selectionCirclesIM = new THREE.InstancedMesh(geo, mat, 1000);
+        selectionCirclesIM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        selectionCirclesIM.visible = false;
+        scene.add(selectionCirclesIM);
+
+        // Anel de seleção para catapultas (raio 2.5 a 4.2)
+        const catGeo = new THREE.RingGeometry(2.5, 4.2, 24);
+        catGeo.rotateX(-Math.PI / 2);
+        const catMat = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.7,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+        selectionCatapultCirclesIM = new THREE.InstancedMesh(catGeo, catMat, 20);
+        selectionCatapultCirclesIM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        selectionCatapultCirclesIM.visible = false;
+        scene.add(selectionCatapultCirclesIM);
     }
 
     if (window.selectedBrigadeId && window.AICommanderSystem) {
-        const brigade = window.AICommanderSystem.knightGeneral.brigades.find(b => b.id === window.selectedBrigadeId);
-        if (brigade && brigade.formations.length > 0) {
-            let cx = 0, cz = 0;
-            // Get center
-            for (const f of brigade.formations) {
-                cx += f.centerPosition.x;
-                cz += f.centerPosition.z;
+        let brigade = window.AICommanderSystem.knightGeneral.brigades.find(b => b.id === window.selectedBrigadeId);
+        let isPlayer = true;
+        
+        if (!brigade) {
+            brigade = window.AICommanderSystem.goblinGeneral.brigades.find(b => b.id === window.selectedBrigadeId);
+            isPlayer = false;
+        }
+
+        if (brigade) {
+            const colorHex = isPlayer ? 0x3b82f6 : 0xef4444; // Azul ou Vermelho
+            selectionCirclesIM.material.color.setHex(colorHex);
+            selectionCatapultCirclesIM.material.color.setHex(colorHex);
+            
+            let count = 0;
+            let catCount = 0;
+            const time = performance.now() * 0.002;
+            const pulseScale = 1 + Math.sin(time * 4) * 0.15;
+            
+            // 1. Soldados nas formações (Guerreiros e Arqueiros)
+            if (brigade.formations && brigade.formations.length > 0) {
+                for (const f of brigade.formations) {
+                    for (const s of f.soldiers) {
+                        if (!s.isDead && count < 1000) {
+                            const groundY = (s.terrainY !== undefined ? s.terrainY : (s.y ? s.y - 1.5 : 0)) + 0.15;
+                            _dummyCircle.position.set(s.x, groundY, s.z);
+                            _dummyCircle.scale.set(pulseScale, 1, pulseScale);
+                            _dummyCircle.rotation.y = time;
+                            _dummyCircle.updateMatrix();
+                            selectionCirclesIM.setMatrixAt(count, _dummyCircle.matrix);
+                            count++;
+                        }
+                    }
+                }
             }
-            cx /= brigade.formations.length;
-            cz /= brigade.formations.length;
+
+            // 2. Catapultas e Empurradores
+            if (window.battleManager && window.battleManager.getCatapults) {
+                const catapults = window.battleManager.getCatapults();
+                for (const c of catapults) {
+                    if (c.brigada === brigade || (c.brigada && c.brigada.id === brigade.id)) {
+                        if (!c.isDead && catCount < 20) {
+                            const groundY = (c.terrainY !== undefined ? c.terrainY : 0) + 0.15;
+                            _dummyCircle.position.set(c.x, groundY, c.z);
+                            _dummyCircle.scale.set(pulseScale, 1, pulseScale);
+                            _dummyCircle.rotation.y = time;
+                            _dummyCircle.updateMatrix();
+                            selectionCatapultCirclesIM.setMatrixAt(catCount, _dummyCircle.matrix);
+                            catCount++;
+                        }
+                        if (c.pushers) {
+                            for (const p of c.pushers) {
+                                if (!p.isDead && count < 1000) {
+                                    const groundY = (p.terrainY !== undefined ? p.terrainY : (p.y ? p.y - 1.5 : 0)) + 0.15;
+                                    _dummyCircle.position.set(p.x, groundY, p.z);
+                                    _dummyCircle.scale.set(pulseScale, 1, pulseScale);
+                                    _dummyCircle.rotation.y = time;
+                                    _dummyCircle.updateMatrix();
+                                    selectionCirclesIM.setMatrixAt(count, _dummyCircle.matrix);
+                                    count++;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             
-            const y = (window.getTerrainHeight ? window.getTerrainHeight(cx, cz) : 0) + 0.2;
-            
-            selectionMarkerMesh.position.set(cx, y, cz);
-            
-            // Animation
-            const time = performance.now() * 0.003;
-            selectionMarkerMesh.children[0].rotation.z = time * 0.5; // Rotate ring (wait, ring is already rotated X, so rotating Z spins it flat)
-            selectionMarkerMesh.children[1].position.y = 8 + Math.sin(time * 2) * 2;
-            selectionMarkerMesh.children[1].rotation.y = time;
-            
-            selectionMarkerMesh.visible = true;
+            selectionCirclesIM.count = count;
+            selectionCirclesIM.instanceMatrix.needsUpdate = true;
+            selectionCirclesIM.visible = (count > 0);
+
+            selectionCatapultCirclesIM.count = catCount;
+            selectionCatapultCirclesIM.instanceMatrix.needsUpdate = true;
+            selectionCatapultCirclesIM.visible = (catCount > 0);
             return;
         }
     }
     
-    selectionMarkerMesh.visible = false;
+    if (selectionCirclesIM) selectionCirclesIM.visible = false;
+    if (selectionCatapultCirclesIM) selectionCatapultCirclesIM.visible = false;
 }
 
 function animate() {

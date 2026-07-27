@@ -279,7 +279,7 @@ const HUD = {
             // Ícone do tipo de tropa
             let typeIcon = '⚔️';
             if (brigade.type === 'ARCHER') typeIcon = '🏹';
-            else if (brigade.type === 'CATAPULT') typeIcon = '🏗️';
+            else if (brigade.type === 'CATAPULT') typeIcon = '🪨';
             
             card.innerHTML = `
                 <div class="text-xl leading-none mb-1 mt-1">${typeIcon}</div>
@@ -311,22 +311,43 @@ const HUD = {
         if (indicator) indicator.classList.remove('hidden');
         
         // Posiciona menu
-        menu.style.left = `${event.clientX}px`;
-        menu.style.top = `${event.clientY - 90}px`; // Acima do mouse
+        const rect = cardElement.getBoundingClientRect();
+        // Centraliza em relação ao card (o menu tem w-40 = 160px)
+        menu.style.left = `${rect.left + (rect.width / 2) - 80}px`;
+        menu.style.top = 'auto'; 
+        menu.style.bottom = `${window.innerHeight - rect.top + 5}px`; // 5px acima do card
         menu.classList.remove('hidden');
         
         window.selectedBrigadeId = brigadeId; // Salva globalmente para setBrigadeOrder
     },
     
-    updateBrigadeCardIcon(brigadeId, order) {
-        // Encontra o card pelo data-attribute
+    selectBrigadeCard(brigadeId, clientX, clientY) {
         const card = document.querySelector(`div[data-brigade-id="${brigadeId}"]`);
         if (card) {
-            if (order === 'WAIT') {
-                card.classList.remove('border-blue-500/50');
+            const rect = card.getBoundingClientRect();
+            const event = {
+                clientX: clientX !== undefined ? clientX : (rect.left + rect.width / 2),
+                clientY: clientY !== undefined ? clientY : (rect.top - 10)
+            };
+            this.showOrderContextMenu(event, brigadeId, card);
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        }
+    },
+    
+    updateBrigadeCardIcon(brigadeId, order) {
+        const card = document.querySelector(`div[data-brigade-id="${brigadeId}"]`);
+        if (card) {
+            card.classList.remove('border-blue-500/50', 'border-amber-400/80', 'border-purple-400/80', 'border-red-400/80', 'border-emerald-400/80', 'shadow-[0_0_8px_rgba(251,191,36,0.4)]', 'shadow-[0_0_8px_rgba(192,132,252,0.4)]', 'shadow-[0_0_8px_rgba(52,211,153,0.4)]');
+            
+            if (order === 'WAIT' || order === 'DEFEND') {
                 card.classList.add('border-amber-400/80', 'shadow-[0_0_8px_rgba(251,191,36,0.4)]');
+            } else if (order === 'FLANK_LEFT' || order === 'FLANK_RIGHT') {
+                card.classList.add('border-purple-400/80', 'shadow-[0_0_8px_rgba(192,132,252,0.4)]');
+            } else if (order === 'RETREAT') {
+                card.classList.add('border-red-400/80');
+            } else if (order === 'MOVE_TO') {
+                card.classList.add('border-emerald-400/80', 'shadow-[0_0_8px_rgba(52,211,153,0.4)]');
             } else {
-                card.classList.remove('border-amber-400/80', 'shadow-[0_0_8px_rgba(251,191,36,0.4)]');
                 card.classList.add('border-blue-500/50');
             }
         }

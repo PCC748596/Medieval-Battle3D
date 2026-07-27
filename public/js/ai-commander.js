@@ -1,20 +1,19 @@
 /**
- * AI Commander System (Hybrid Layered AI)
+ * AI Commander System (Hybrid Layered AI - Battle-AI Spec)
  * General -> Brigada -> Formacao -> Soldado
  * 
- * REGRA FUNDAMENTAL: Este sistema NÃO interfere no combate individual.
- * O warrior.js já tem busca de alvo, ataque e movimentação funcionando.
- * O Commander apenas:
- *   1. Rastreia o estado geral (ADVANCING, ENGAGED, FLEEING) para o HUD
- *   2. Mantém estatísticas de moral/coesão da brigada
- *   3. NÃO seta formationTarget = null (isso mata a IA dos soldados)
+ * Estrutura de 4 camadas:
+ * 1. General: Avaliação estratégica global (2-3s)
+ * 2. Comandante: Tradução de ordens em movimentação/waypoints de brigada (250ms)
+ * 3. Formação: Manutenção de coesão, direção e grade de vagas/slots (100ms)
+ * 4. Soldado: Reação local e execução em warrior.js
  */
 
 class Formacao {
     constructor(brigada) {
         this.brigada = brigada;
         this.soldiers = [];
-        this.type = 'line'; // 'line', 'block', 'wedge'
+        this.type = 'block'; // 'block', 'line', 'wedge'
         this.lastUpdate = 0;
         this.cohesion = 100;
         this.centerPosition = new THREE.Vector3();
@@ -26,42 +25,68 @@ class Formacao {
         soldier.formation = this;
     }
 
+    reorganizeSlots() {
+        const activeSoldiers = this.soldiers.filter(s => !s.isDead && !s.isFleeing);
+        if (activeSoldiers.length === 0) return;
+
+        const colsPerBlock = CONFIG.UNITS_COLS_PER_BLOCK || 10;
+        const spacingX = CONFIG.UNITS_SPACING_X || 2.5;
+        const spacingZ = CONFIG.UNITS_SPACING_Z || 2.5;
+
+        const dirX = this.direction.x || 0;
+        const dirZ = this.direction.z || 1;
+        const perpX = -dirZ;
+        const perpZ = dirX;
+
+        const center = this.centerPosition;
+
+        for (let i = 0; i < activeSoldiers.length; i++) {
+            const s = activeSoldiers[i];
+            const row = Math.floor(i / colsPerBlock);
+            const col = i % colsPerBlock;
+            const colOffset = (col - (colsPerBlock - 1) / 2) * spacingZ;
+            const rowOffset = row * spacingX;
+
+            const slotX = center.x + dirX * rowOffset + perpX * colOffset;
+            const slotZ = center.z + dirZ * rowOffset + perpZ * colOffset;
+
+            if (!s.formationTarget) {
+                s.formationTarget = new THREE.Vector3();
+            }
+            s.formationTarget.set(slotX, s.y || (s.terrainY !== undefined ? s.terrainY + 1.5 : 0), slotZ);
+        }
+    }
+
     update(now) {
         if (now - this.lastUpdate < CONFIG.AI_FORMACAO_UPDATE_MS) return;
         this.lastUpdate = now;
 
-        if (this.soldiers.length === 0) return;
+        const activeSoldiers = this.soldiers.filter(s => !s.isDead);
+        if (activeSoldiers.length === 0) return;
 
-        // Calculate center of living soldiers
+        // Calcular centro dos soldados vivos
         this.centerPosition.set(0, 0, 0);
-        let activeCount = 0;
-        
-        for (const s of this.soldiers) {
-            if (!s.isDead) {
-                this.centerPosition.x += s.x;
-                this.centerPosition.y += s.y;
-                this.centerPosition.z += s.z;
-                activeCount++;
-            }
+        for (const s of activeSoldiers) {
+            this.centerPosition.x += s.x;
+            this.centerPosition.y += s.y;
+            this.centerPosition.z += s.z;
         }
+        this.centerPosition.divideScalar(activeSoldiers.length);
 
-        if (activeCount > 0) {
-            this.centerPosition.divideScalar(activeCount);
-        }
-
-        // Calculate cohesion (how spread out the formation is)
-        if (activeCount > 1) {
+        // Calcular coesão da formação
+        if (activeSoldiers.length > 1) {
             let totalSpread = 0;
-            for (const s of this.soldiers) {
-                if (s.isDead) continue;
+            for (const s of activeSoldiers) {
                 const dx = s.x - this.centerPosition.x;
                 const dz = s.z - this.centerPosition.z;
-                totalSpread += Math.sqrt(dx * dx + dz * dz);
+                totalSpread += Math.hypot(dx, dz);
             }
-            const avgSpread = totalSpread / activeCount;
-            // Cohesion: 100 = tight, 0 = very spread out
+            const avgSpread = totalSpread / activeSoldiers.length;
             this.cohesion = Math.max(0, Math.min(100, 100 - avgSpread * 2));
         }
+
+        // Reorganizar alinhamento de vagas (Slots)
+        this.reorganizeSlots();
     }
 }
 
@@ -69,13 +94,17 @@ class Brigada {
     constructor(general, id, type) {
         this.general = general;
         this.id = id;
-        this.type = type; // 'INFANTRY', 'CAVALRY', 'ARCHER', etc.
+        this.type = type; // 'MELEE', 'ARCHER', 'CATAPULT'
         this.formations = [];
         this.lastUpdate = 0;
         this.targetPosition = new THREE.Vector3();
         this.targetBrigade = null;
-        this.state = 'IDLE'; // IDLE, ADVANCING, ENGAGED, BREAKING, FLEEING
-        this.order = 'ADVANCE'; // ADVANCE, WAIT
+        this.state = 'IDLE'; // IDLE, MARCHING, REPOSITIONING, PREPARING_COMBAT, COMBATING, PURSUE, REGROUPING, RETREATING, FLEEING, DESTROYED
+        this.order = 'ADVANCE'; // WAIT, ADVANCE, RETREAT, DEFEND, FLANK_LEFT, FLANK_RIGHT, BOMBARD, FOCUS_FIRE, REGROUP, PURSUE
+        this.morale = 100;
+        this.initialSoldierCount = 0;
+        this.flankWaypoint = null;
+        this.reachedFlankWaypoint = false;
     }
 
     createFormation() {
@@ -84,15 +113,24 @@ class Brigada {
         return f;
     }
 
+    getAliveSoldiers() {
+        let count = 0;
+        for (const f of this.formations) {
+            for (const s of f.soldiers) {
+                if (!s.isDead) count++;
+            }
+        }
+        return count;
+    }
+
     update(now) {
         if (now - this.lastUpdate < CONFIG.AI_BRIGADA_UPDATE_MS) return;
         this.lastUpdate = now;
 
-        // Count alive, fleeing, and fighting soldiers
         let alive = 0;
         let fleeing = 0;
         let fighting = 0;
-        
+
         for (const f of this.formations) {
             for (const s of f.soldiers) {
                 if (!s.isDead) {
@@ -103,24 +141,95 @@ class Brigada {
             }
         }
 
+        if (this.initialSoldierCount === 0 && alive > 0) {
+            this.initialSoldierCount = alive;
+        }
+
         if (alive === 0) {
             this.state = 'DESTROYED';
             return;
         }
 
-        // Determine brigade state based on what soldiers are ACTUALLY doing
-        // (observe, don't command — the warrior.js handles the real behavior)
-        if (fleeing > 0 && fleeing / alive > 0.5) {
-            this.state = 'FLEEING';
-        } else if (fleeing > 0) {
-            this.state = 'BREAKING';
-        } else if (fighting > 0) {
-            this.state = 'ENGAGED';
-        } else {
-            this.state = 'ADVANCING';
+        // --- SISTEMA DE MORAL (Etapa 7) ---
+        if (this.initialSoldierCount > 0) {
+            const casualtyRatio = (this.initialSoldierCount - alive) / this.initialSoldierCount;
+            let currentMorale = 100 - casualtyRatio * 75;
+
+            if (fleeing > 0) {
+                currentMorale -= (fleeing / alive) * 30;
+            }
+
+            this.morale = Math.max(0, Math.min(100, Math.round(currentMorale)));
         }
 
-        // Update all formations (just stats tracking)
+        // Se a moral zerar ou cair abaixo do limite, debandar a brigada
+        if (this.morale < (CONFIG.MORALE_FLEE_THRESHOLD || 20)) {
+            this.state = 'FLEEING';
+            for (const f of this.formations) {
+                for (const s of f.soldiers) {
+                    if (!s.isDead) s.isFleeing = true;
+                }
+            }
+            return;
+        }
+
+        // --- MÁQUINA DE ESTADOS DO COMANDANTE (Etapas 4 e 11) ---
+        if (this.order === 'WAIT' || this.order === 'DEFEND') {
+            this.state = fighting > 0 ? 'COMBATING' : 'IDLE';
+        } else if (this.order === 'RETREAT') {
+            this.state = 'RETREATING';
+        } else if (this.order === 'FLANK_LEFT' || this.order === 'FLANK_RIGHT') {
+            if (!this.reachedFlankWaypoint) {
+                this.state = 'REPOSITIONING';
+            } else {
+                this.state = fighting > 0 ? 'COMBATING' : 'MARCHING';
+            }
+        } else if (this.order === 'PURSUE') {
+            this.state = 'PURSUE';
+        } else if (this.order === 'MOVE_TO') {
+            this.state = fighting > 0 ? 'COMBATING' : 'MARCHING';
+        } else {
+            this.state = fighting > 0 ? 'COMBATING' : 'MARCHING';
+        }
+
+        // Orientar a direção das formações com base no alvo / waypoints
+        if (this.order === 'MOVE_TO' && this.customDestination && this.formations.length > 0) {
+            const firstForm = this.formations[0];
+            if (firstForm.centerPosition && firstForm.direction) {
+                const dir = _tmpVec3A.subVectors(this.customDestination, firstForm.centerPosition).normalize();
+                if (dir.lengthSq() > 0.001) {
+                    firstForm.direction.copy(dir);
+                }
+            }
+        } else if (this.targetBrigade && this.formations.length > 0) {
+            const firstForm = this.formations[0];
+            if (firstForm.centerPosition && firstForm.direction) {
+                let targetPos = (this.targetBrigade.formations[0] && this.targetBrigade.formations[0].centerPosition) ? this.targetBrigade.formations[0].centerPosition : this.targetPosition;
+
+                // Lógica de Flanqueamento: definir waypoint lateral antes de engajar
+                if ((this.order === 'FLANK_LEFT' || this.order === 'FLANK_RIGHT') && !this.reachedFlankWaypoint) {
+                    const sideMultiplier = this.order === 'FLANK_LEFT' ? -1 : 1;
+                    const offsetZ = sideMultiplier * (sizeZ * 0.35);
+                    const waypointX = (this.general.side === 'knight' ? 1 : -1) * (sizeX * 0.1);
+
+                    if (!this.flankWaypoint) {
+                        this.flankWaypoint = new THREE.Vector3(waypointX, 0, offsetZ);
+                    }
+                    targetPos = this.flankWaypoint;
+
+                    if (firstForm.centerPosition.distanceTo(targetPos) < 15.0) {
+                        this.reachedFlankWaypoint = true;
+                    }
+                }
+
+                const dir = _tmpVec3A.subVectors(targetPos, firstForm.centerPosition).normalize();
+                if (dir.lengthSq() > 0.001) {
+                    firstForm.direction.copy(dir);
+                }
+            }
+        }
+
+        // Atualizar todas as formações
         for (const f of this.formations) {
             f.update(now);
         }
@@ -144,14 +253,53 @@ class General {
         if (now - this.lastUpdate < CONFIG.AI_GENERAL_UPDATE_MS) return;
         this.lastUpdate = now;
 
-        // General AI: just tracks which enemy brigade is closest (for HUD info)
-        for (const b of this.brigades) {
-            if (b.state === 'FLEEING' || b.state === 'DESTROYED') continue;
-            
+        const activeBrigades = this.brigades.filter(b => b.state !== 'FLEEING' && b.state !== 'DESTROYED');
+        if (activeBrigades.length === 0) return;
+
+        // --- AVALIAÇÃO ESTRATÉGICA DO GENERAL (Etapa 3) ---
+        let totalMyAlive = 0;
+        let totalEnemyAlive = 0;
+        for (const b of activeBrigades) totalMyAlive += b.getAliveSoldiers();
+        for (const eb of enemyGeneral.brigades) {
+            if (eb.state !== 'FLEEING' && eb.state !== 'DESTROYED') {
+                totalEnemyAlive += eb.getAliveSoldiers();
+            }
+        }
+
+        const numericRatio = totalEnemyAlive > 0 ? totalMyAlive / totalEnemyAlive : 2.0;
+
+        // Se for o General da CPU (Goblins), toma decisões estratégicas automáticas
+        if (this.side === 'goblin') {
+            for (const b of activeBrigades) {
+                if (numericRatio < 0.45 && b.morale < 50) {
+                    b.order = 'RETREAT';
+                } else if (totalEnemyAlive > 0 && totalEnemyAlive < 15) {
+                    b.order = 'PURSUE';
+                } else if (b.type === 'ARCHER') {
+                    b.order = 'FOCUS_FIRE';
+                } else if (b.type === 'CATAPULT') {
+                    b.order = 'BOMBARD';
+                }
+            }
+
+            // Oportunidade de Flanqueamento (Etapa 8)
+            const enemyInfantryEngaged = enemyGeneral.brigades.some(eb => eb.type === 'MELEE' && eb.state === 'COMBATING');
+            if (enemyInfantryEngaged) {
+                const freeMelee = activeBrigades.find(b => b.type === 'MELEE' && b.state === 'MARCHING' && b.order === 'ADVANCE');
+                if (freeMelee) {
+                    freeMelee.order = Math.random() < 0.5 ? 'FLANK_LEFT' : 'FLANK_RIGHT';
+                    freeMelee.reachedFlankWaypoint = false;
+                    freeMelee.flankWaypoint = null;
+                }
+            }
+        }
+
+        // Atribuir brigada-alvo mais próxima
+        for (const b of activeBrigades) {
             if (!b.targetBrigade || b.targetBrigade.state === 'FLEEING' || b.targetBrigade.state === 'DESTROYED') {
                 let closest = null;
                 let minDist = Infinity;
-                
+
                 for (const eb of enemyGeneral.brigades) {
                     if (eb.state !== 'FLEEING' && eb.state !== 'DESTROYED' && eb.formations.length > 0 && b.formations.length > 0) {
                         const dist = b.formations[0].centerPosition.distanceToSquared(eb.formations[0].centerPosition);
@@ -161,7 +309,7 @@ class General {
                         }
                     }
                 }
-                
+
                 if (closest) {
                     b.targetBrigade = closest;
                 }
@@ -177,19 +325,18 @@ class AICommander {
     }
 
     update(now) {
-        if (PerformanceProfiler) PerformanceProfiler.start('ia_commander');
-        
+        if (typeof PerformanceProfiler !== 'undefined') PerformanceProfiler.start('ia_commander');
+
         this.knightGeneral.update(now, this.goblinGeneral);
         this.goblinGeneral.update(now, this.knightGeneral);
-        
+
         for (const b of this.knightGeneral.brigades) {
             b.update(now);
         }
         for (const b of this.goblinGeneral.brigades) {
             b.update(now);
         }
-        
-        // Update HUD with observed states
+
         if (window.HUD && window.HUD.updateAIStatus) {
             const kb = this.knightGeneral.brigades[0];
             const kf = kb && kb.formations[0];
@@ -200,7 +347,7 @@ class AICommander {
             window.HUD.updateAIStatus('goblins', 'COMANDO', gb ? gb.state : 'N/A', gf ? gf.type.toUpperCase() : 'N/A');
         }
 
-        if (PerformanceProfiler) PerformanceProfiler.end('ia_commander');
+        if (typeof PerformanceProfiler !== 'undefined') PerformanceProfiler.end('ia_commander');
     }
 }
 
@@ -208,18 +355,18 @@ window.AICommanderSystem = new AICommander();
 
 window.setBrigadeOrder = function(order) {
     if (!window.selectedBrigadeId) return;
-    
-    // Find brigade
+
     const b = window.AICommanderSystem.knightGeneral.brigades.find(br => br.id === window.selectedBrigadeId);
     if (b) {
         b.order = order;
+        b.reachedFlankWaypoint = false;
+        b.flankWaypoint = null;
         if (window.HUD && window.HUD.updateBrigadeCardIcon) {
             window.HUD.updateBrigadeCardIcon(b.id, order);
         }
     }
-    
-    // Hide context menu
-    if (window.HUD && window.HUD.elements.orderContextMenu) {
+
+    if (window.HUD && window.HUD.elements && window.HUD.elements.orderContextMenu) {
         window.HUD.elements.orderContextMenu.classList.add('hidden');
     }
     document.querySelectorAll('.indicator-select').forEach(el => el.classList.add('hidden'));
@@ -227,9 +374,21 @@ window.setBrigadeOrder = function(order) {
     window.selectedBrigadeId = null;
 };
 
+window.setBrigadeMoveTo = function(brigadeId, tx, tz) {
+    const b = window.AICommanderSystem.knightGeneral.brigades.find(br => br.id === brigadeId);
+    if (b) {
+        b.order = 'MOVE_TO';
+        b.customDestination = new THREE.Vector3(tx, 0, tz);
+        b.reachedFlankWaypoint = false;
+        b.flankWaypoint = null;
+        if (window.HUD && window.HUD.updateBrigadeCardIcon) {
+            window.HUD.updateBrigadeCardIcon(b.id, 'MOVE_TO');
+        }
+    }
+};
+
 window.randomizeCPUOrders = function() {
     window.AICommanderSystem.goblinGeneral.brigades.forEach(b => {
-        // Exemplo: 70% chance de avançar, 30% chance de aguardar defensivamente
         b.order = Math.random() < 0.7 ? 'ADVANCE' : 'WAIT';
     });
     if (window.HUD && window.HUD.renderGroups) {

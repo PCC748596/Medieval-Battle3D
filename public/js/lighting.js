@@ -1,6 +1,6 @@
 // --- 3. ILUMINAÇÃO & AMBIENTES ---
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
-scene.add(ambientLight);
+if (window.scene) scene.add(ambientLight);
 
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
 dirLight.position.set(100, 300, 100);
@@ -14,16 +14,19 @@ dirLight.shadow.camera.right = 500;
 dirLight.shadow.camera.top = 500;
 dirLight.shadow.camera.bottom = -500;
 dirLight.shadow.camera.updateProjectionMatrix();
-scene.add(dirLight);
+if (window.scene) scene.add(dirLight);
 
 const rimLight = new THREE.DirectionalLight(0xffffff, 0.3);
 rimLight.position.set(-20, 10, -10);
-scene.add(rimLight);
+if (window.scene) scene.add(rimLight);
 
-let currentEnv = 'dia';
+currentEnv = 'dia';
 function setEnvironment(type) {
     currentEnv = type;
-    HUD.updateWeather(type);
+    if (window.HUD && window.HUD.updateWeather) {
+        HUD.updateWeather(type);
+    }
+    if (!window.scene || !scene.background) return;
 
     if (type === 'dia') {
         scene.background.setHex(0x87CEEB);
