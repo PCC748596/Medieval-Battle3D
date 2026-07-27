@@ -502,6 +502,114 @@ let selectionCirclesIM = null;
 let selectionCatapultCirclesIM = null;
 const _dummyCircle = new THREE.Object3D();
 
+let tacticalArrowMesh = null;
+
+window.updateTacticalArrow = function(origin, target, colorHex = 0x3b82f6, shaftWidth = 3.6, headWidth = 7.2, headLength = 9.0) {
+    if (!origin || !target) return;
+    
+    if (!tacticalArrowMesh) {
+        const mat = new THREE.MeshBasicMaterial({
+            color: colorHex,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.85,
+            depthWrite: false
+        });
+        const geo = new THREE.BufferGeometry();
+        tacticalArrowMesh = new THREE.Mesh(geo, mat);
+        tacticalArrowMesh.renderOrder = 999;
+        scene.add(tacticalArrowMesh);
+    }
+    
+    tacticalArrowMesh.material.color.setHex(colorHex);
+    
+    const dist = Math.hypot(target.x - origin.x, target.z - origin.z);
+    if (dist < 2.0) {
+        tacticalArrowMesh.visible = false;
+        return;
+    }
+    
+    const dx = (target.x - origin.x) / dist;
+    const dz = (target.z - origin.z) / dist;
+    const px = -dz;
+    const pz = dx;
+    
+    const actualHeadLength = Math.min(headLength, dist * 0.45);
+    const shaftLength = dist - actualHeadLength;
+    
+    const segments = Math.max(4, Math.floor(shaftLength / 10.0));
+    const vertices = [];
+    const uvs = [];
+    
+    for (let i = 0; i <= segments; i++) {
+        const t = i / segments;
+        const curDist = t * shaftLength;
+        const cx = origin.x + dx * curDist;
+        const cz = origin.z + dz * curDist;
+        
+        const lx = cx - px * (shaftWidth * 0.5);
+        const lz = cz - pz * (shaftWidth * 0.5);
+        const rx = cx + px * (shaftWidth * 0.5);
+        const rz = cz + pz * (shaftWidth * 0.5);
+        
+        const ly = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(lx, lz) : origin.y) + 0.35;
+        const ry = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(rx, rz) : origin.y) + 0.35;
+        
+        vertices.push(lx, ly, lz);
+        vertices.push(rx, ry, rz);
+        uvs.push(0, t);
+        uvs.push(1, t);
+    }
+    
+    const baseCx = origin.x + dx * shaftLength;
+    const baseCz = origin.z + dz * shaftLength;
+    
+    const headLx = baseCx - px * (headWidth * 0.5);
+    const headLz = baseCz - pz * (headWidth * 0.5);
+    const headRx = baseCx + px * (headWidth * 0.5);
+    const headRz = baseCz + pz * (headWidth * 0.5);
+    
+    const headLy = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(headLx, headLz) : origin.y) + 0.35;
+    const headRy = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(headRx, headRz) : origin.y) + 0.35;
+    
+    const tipX = target.x;
+    const tipZ = target.z;
+    const tipY = (typeof getTerrainHeight !== 'undefined' ? getTerrainHeight(tipX, tipZ) : target.y) + 0.35;
+    
+    const indices = [];
+    for (let i = 0; i < segments; i++) {
+        const v = i * 2;
+        indices.push(v, v + 1, v + 2);
+        indices.push(v + 1, v + 3, v + 2);
+    }
+    
+    const headStartIdx = (segments + 1) * 2;
+    vertices.push(headLx, headLy, headLz);
+    vertices.push(headRx, headRy, headRz);
+    vertices.push(tipX, tipY, tipZ);
+    uvs.push(0, 1);
+    uvs.push(1, 1);
+    uvs.push(0.5, 1.2);
+    
+    indices.push(headStartIdx, headStartIdx + 1, headStartIdx + 2);
+    
+    const oldGeo = tacticalArrowMesh.geometry;
+    tacticalArrowMesh.geometry = new THREE.BufferGeometry();
+    tacticalArrowMesh.geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    tacticalArrowMesh.geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    tacticalArrowMesh.geometry.setIndex(indices);
+    tacticalArrowMesh.geometry.computeVertexNormals();
+    if (oldGeo) oldGeo.dispose();
+    
+    tacticalArrowMesh.visible = true;
+};
+
+window.hideTacticalArrow = function() {
+    if (tacticalArrowMesh) {
+        tacticalArrowMesh.visible = false;
+    }
+};
+
 function renderSelectionMarker() {
     if (!selectionCirclesIM) {
         // Anel de seleção para soldados (raio 0.8 a 1.6)
@@ -609,12 +717,33 @@ function renderSelectionMarker() {
             selectionCatapultCirclesIM.count = catCount;
             selectionCatapultCirclesIM.instanceMatrix.needsUpdate = true;
             selectionCatapultCirclesIM.visible = (catCount > 0);
+
+            if (!window.isDraggingPath) {
+                let targetPos = null;
+                if (brigade.order === 'MOVE_TO' && brigade.customDestination) {
+                    targetPos = brigade.customDestination;
+                } else if (brigade.flankWaypoint && !brigade.reachedFlankWaypoint) {
+                    targetPos = brigade.flankWaypoint;
+                } else if (brigade.targetBrigade) {
+                    targetPos = window.getBrigadeCenter ? window.getBrigadeCenter(brigade.targetBrigade) : null;
+                } else if (brigade.targetPosition) {
+                    targetPos = brigade.targetPosition;
+                }
+
+                const originPos = window.getBrigadeCenter ? window.getBrigadeCenter(brigade) : null;
+                if (originPos && targetPos && originPos.distanceTo(targetPos) > 3.0) {
+                    window.updateTacticalArrow(originPos, targetPos, colorHex);
+                } else {
+                    window.hideTacticalArrow();
+                }
+            }
             return;
         }
     }
     
     if (selectionCirclesIM) selectionCirclesIM.visible = false;
     if (selectionCatapultCirclesIM) selectionCatapultCirclesIM.visible = false;
+    if (!window.isDraggingPath) window.hideTacticalArrow();
 }
 
 function animate() {

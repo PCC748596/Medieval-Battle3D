@@ -395,3 +395,46 @@ window.randomizeCPUOrders = function() {
         window.HUD.renderGroups('goblins', window.AICommanderSystem.goblinGeneral.brigades);
     }
 };
+
+window.getBrigadeCenter = function(b) {
+    if (!b) return new THREE.Vector3(0, 0, 0);
+    const center = new THREE.Vector3(0, 0, 0);
+    let count = 0;
+    if (b.formations && b.formations.length > 0) {
+        for (const f of b.formations) {
+            if (f.soldiers) {
+                for (const s of f.soldiers) {
+                    if (!s.isDead) {
+                        center.x += s.x;
+                        center.y += (s.terrainY !== undefined ? s.terrainY : (s.y ? s.y - 1.5 : 0));
+                        center.z += s.z;
+                        count++;
+                    }
+                }
+            }
+        }
+    }
+    if (count === 0 && window.battleManager && window.battleManager.getCatapults) {
+        const catapults = window.battleManager.getCatapults();
+        for (const c of catapults) {
+            if ((c.brigada === b || (c.brigada && c.brigada.id === b.id)) && !c.isDead) {
+                center.x += c.x;
+                center.y += (c.terrainY !== undefined ? c.terrainY : 0);
+                center.z += c.z;
+                count++;
+            }
+        }
+    }
+    if (count > 0) {
+        center.divideScalar(count);
+        if (b.formations && b.formations[0]) {
+            b.formations[0].centerPosition.copy(center);
+        }
+        return center;
+    }
+    if (b.formations && b.formations[0] && b.formations[0].centerPosition && (b.formations[0].centerPosition.x !== 0 || b.formations[0].centerPosition.z !== 0)) {
+        return b.formations[0].centerPosition.clone();
+    }
+    return new THREE.Vector3(0, 0, 0);
+};
+
