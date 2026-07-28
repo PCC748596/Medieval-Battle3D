@@ -48,50 +48,58 @@
     </div>
 
     <!-- Novo Painel Inferior de Planejamento -->
-    <div id="bottom-command-hud" class="absolute bottom-0 left-0 w-full z-10 pointer-events-none flex flex-col justify-end p-4 gap-2">
+    <div id="bottom-command-hud" class="absolute bottom-0 left-0 w-full z-10 pointer-events-none flex flex-col justify-end p-3 gap-2">
         
         <!-- Painel Principal Inferior -->
-        <div class="flex justify-between items-end w-full max-w-[1400px] mx-auto pointer-events-auto bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-700/50 shadow-2xl p-4 gap-4">
+        <div class="flex items-center justify-between w-full max-w-[1400px] mx-auto pointer-events-auto bg-slate-900/85 backdrop-blur-md rounded-2xl border border-slate-700/50 shadow-2xl p-3.5 gap-4">
             
-            <!-- Exército Azul (Jogador) -->
-            <div class="flex-1 flex flex-col gap-2">
-                <div class="text-blue-400 font-black text-sm uppercase tracking-wider flex items-center gap-2">
-                    <div class="w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse"></div>
-                    Jogador
+            <!-- Exército Azul (Jogador) - Ocupa todo o espaço disponível -->
+            <div class="flex-1 flex flex-col gap-2 min-w-0">
+                <div class="flex items-center justify-between">
+                    <div class="text-blue-400 font-black text-xs uppercase tracking-wider flex items-center gap-2">
+                        <div class="w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse"></div>
+                        Brigadas do Jogador
+                    </div>
+                    <div class="text-slate-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 bg-slate-800/60 px-2.5 py-1 rounded-md border border-slate-700/50">
+                        <span>VS</span>
+                        <span class="text-red-400 font-black">CPU (IA)</span>
+                        <span class="text-slate-500 text-[9px] ml-1">(Ordens Ocultas)</span>
+                    </div>
                 </div>
-                <!-- Grupos (Gerados dinamicamente via JS) -->
-                <div id="blue-groups-container" class="flex flex-wrap gap-2">
-                    <!-- Exemplo de carta (será gerado) -->
+                
+                <!-- Grupos (Aproveita toda a largura da tela) -->
+                <div id="blue-groups-container" class="flex flex-wrap gap-2 max-h-[110px] overflow-y-auto pr-1">
+                    <!-- Cartas geradas dinamicamente via JS -->
                 </div>
             </div>
 
-            <!-- VS Placar Central e Botão de Iniciar -->
-            <div class="flex flex-col items-center justify-center min-w-[120px] pb-2">
-                <button id="btn-start-battle" onclick="startPreBattle()" class="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-900 font-black rounded-lg shadow-[0_0_10px_rgba(245,158,11,0.5)] border border-amber-300 transition-all active:scale-95 text-[10px] uppercase tracking-wider mb-2 hidden">
-                    Iniciar
+            <!-- Botão de Iniciar Confronto (Canto Direito) -->
+            <div class="flex flex-col items-center justify-center shrink-0 pl-2 border-l border-slate-700/50">
+                <button id="btn-start-battle" onclick="startPreBattle()" class="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-900 font-black rounded-xl shadow-[0_0_12px_rgba(245,158,11,0.5)] border border-amber-300 transition-all active:scale-95 text-xs uppercase tracking-wider flex items-center gap-1.5 hidden">
+                    <span>⚔️</span> Iniciar
                 </button>
-                <div class="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">Confronto</div>
-                <div class="text-2xl font-black text-amber-500 leading-none">VS</div>
             </div>
 
-            <!-- Exército Vermelho (CPU) -->
-            <div class="flex-1 flex flex-col gap-2 items-end">
-                <div class="text-red-400 font-black text-sm uppercase tracking-wider flex items-center gap-2">
-                    CPU (IA)
-                    <div class="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></div>
-                </div>
-                <div class="text-slate-500 text-xs font-bold uppercase tracking-widest mt-2 border border-slate-700/50 border-dashed rounded-lg px-4 py-2 bg-slate-800/30">
-                    Ordens Ocultas
-                </div>
-                <div id="red-groups-container" class="hidden"></div>
-            </div>
+            <!-- Div oculto do exército vermelho para compatibilidade de JS -->
+            <div id="red-groups-container" class="hidden"></div>
             
         </div>
     </div>
     
+    <!-- Indicador Visual de Mira ao passar o mouse sobre exércitos inimigos -->
+    <div id="enemy-hover-crosshair" class="fixed pointer-events-none hidden z-50 flex items-center justify-center -translate-x-1/2 -translate-y-1/2 transition-transform duration-75">
+        <div class="w-10 h-10 border-2 border-red-500 rounded-full animate-ping opacity-75"></div>
+        <div class="absolute w-8 h-8 border-2 border-amber-400 rounded-full flex items-center justify-center shadow-[0_0_12px_rgba(239,68,68,0.8)]">
+            <div class="w-2 h-2 bg-red-500 rounded-full"></div>
+        </div>
+        <div class="absolute -top-7 bg-red-950/90 text-amber-300 border border-red-500/80 text-[11px] font-black px-2 py-0.5 rounded-md shadow-2xl whitespace-nowrap tracking-wider uppercase flex items-center gap-1">
+            <span>⚔️</span> <span>Atacar Exército</span>
+        </div>
+    </div>
+
     <!-- Menu de Contexto para Ordens (Escondido) -->
     <div id="order-context-menu" class="absolute z-20 hidden bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-1.5 flex flex-col gap-1 w-40 max-h-64 overflow-y-auto">
-        <button onclick="setBrigadeOrder('ADVANCE')" class="text-left px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 rounded-lg transition-colors flex items-center gap-1.5">⚔️ Avançar</button>
+        <button onclick="setBrigadeOrder('ADVANCE')" class="text-left px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 rounded-lg transition-colors flex items-center gap-1.5">⚔️ Atacar</button>
         <button onclick="setBrigadeOrder('WAIT')" class="text-left px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 rounded-lg transition-colors flex items-center gap-1.5">🛡️ Defender / Espere</button>
         <button onclick="setBrigadeOrder('FLANK_LEFT')" class="text-left px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 rounded-lg transition-colors flex items-center gap-1.5">↖️ Flanquear Esq.</button>
         <button onclick="setBrigadeOrder('FLANK_RIGHT')" class="text-left px-2.5 py-1 text-xs font-bold text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 rounded-lg transition-colors flex items-center gap-1.5">↗️ Flanquear Dir.</button>
